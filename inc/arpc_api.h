@@ -1,0 +1,475 @@
+/*
+ * Copyright(C) 2020 Ruijie Network. All rights reserved.
+ */
+
+/*!
+* \file async_rpc_api.h
+* \brief 异步session接口
+* 
+* 包含异步session外部所用到的接口和结构体
+*
+* \copyright 2020 Ruijie Network. All rights reserved.
+* \author hongchunhua@ruijie.com.cn
+* \version v1.0.0
+* \date 2020.08.05
+* \note none 
+*/
+
+#ifndef _ARPC_API_H_
+#define _ARPC_API_H_
+
+#include <stdio.h>
+#include <string.h>
+#include <inttypes.h>
+#include <errno.h>
+#include <stdint.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+typedef void* arpc_session_handle_t;				/*! @brief session 句柄 */
+typedef void* arpc_server_t;						/*! @brief server */
+
+#define _DEF_SESSION_SERVER
+#define _DEF_SESSION_CLIENT
+
+/*! 
+ * @brief arpc消息框架全局初始化
+ * 
+ * 无论是client还是server,必须先全局初始化后，才能使用session功能。
+ * 这里暂未实现配置入参，后续支持// todo
+ * 
+ * @return  int; (<em>-1</em>: fail ; ( <em>0</em>: succeed
+ */
+int arpc_init();
+
+/*! 
+ * @brief arpc消息框架结束退出
+ * 
+ * 所有session都关闭和server资源都释放后，再调用这个，否则会有意想不到的错误
+ * 
+ * @return  void; 
+ */
+void arpc_finish();
+
+
+enum arpc_trans_type {
+	ARPC_E_TRANS_TCP = 0,
+};
+
+#define IPV4_MAX_LEN 16
+struct arpc_ipv4_addr {
+	char ip[IPV4_MAX_LEN];					
+	uint32_t port;				
+};
+
+/**
+ * @brief  链路参数
+ *
+ * @details
+ *  	用于session的传输层的通信参数，如TCP/IP；这里暂时支持TCP模式，
+ * 		后续可以拓展通信方式，如本地进程通信等
+ */
+struct arpc_con_info{
+	enum arpc_trans_type type;
+	union{
+		struct arpc_ipv4_addr ipv4;
+	};
+};
+
+/**
+ * @brief  IOV结构
+ *
+ * @details
+ *  	
+ */
+struct arpc_iov{
+	void* 		data;
+	size_t		len;
+};
+
+/**
+ * @brief  arpc基础消息结构
+ *
+ * @details
+ *  	arpc对外提供的数据结构
+ */
+struct arpc_vmsg{
+	uint32_t		head_len;								/*! @brief 头部长度 */
+	void			*head;									/*! @brief 头部数据 */
+	uint64_t		total_data;								/*! @brief 数据全部长度 */
+	uint32_t 		vec_num;								/*! @brief IO vector数量 */
+	struct arpc_iov *vec;									/*! @brief vector */
+};
+
+/*! 
+ * @brief 内存释放函数
+ * 
+ * @param[in] size ,消息头长度
+ * @param[in] usr_context ,用户上下文，初始化时由调用者入参，由调用者使用
+ * @return mem buf
+ */
+typedef int (*mem_free_cb_t)(void* buf_ptr, void* usr_context);
+
+#define METHOD_ALLOC_DATA_BUF	0  							/*! @brief 申请自定义内存 */
+#define METHOD_PROCESS_ASYNC	1  							/*! @brief 异步处理 */
+
+/**
+ * @brief  标记位操作方法
+ *
+ * @details
+ *  	用于请求处理后，设置session主框架参数
+ */
+#define SET_METHOD(flag, method) (flag=(flag|(1<<method)))	/*! @brief 设置方法 */
+#define CLR_METHOD(flag, method) (flag=(flag&~(1<<tag)))	/*! @brief 清除方法 */
+#define CLR_ALL_METHOD(flag) (flag=0)						/*! @brief 清除全部方法 */
+
+/**
+ * @brief  消息头信息
+ *
+ * @details
+ *  	收到请求消息时，先读取消息头，执行回调函数后，在继续接收消息体
+ */
+struct arpc_header_msg{
+	uint32_t		head_len;								/*! @brief 头部长度 */
+	void			*head;									/*! @brief 头部数据 */
+	uint64_t		data_len;								/*! @brief 数据全部长度 */
+};
+
+/**
+ * @brief  请求消息操作函数
+ *
+ * @details
+ *  	session收到消息类型有三种，请求（request）/回复（respone）/单向消息（oneway）
+ * 		每个消息体都执行不同的操作函数。请求消息框架必须自动回复消息给请求方，如果调用者
+ * 		需要回复私有数据，则需要注册释放函数《release_rsp_cb》来释放私有数据资源
+ */
+struct request_ops {
+	void* (*alloc_cb)(uint32_t size, void* usr_context);
+	int (*free_cb)(void* buf_ptr, void* usr_context);
+
+	/*! @brief step1, 处理消息头，获取数据体参数（如预分配内存） */
+	int (*proc_head_cb)(struct arpc_header_msg *header, void* usr_context, uint32_t *flag);
+
+	/*! @brief step2, 已接收数据到指定的buf里，处理数据。*/
+	int (*proc_data_cb)(const struct arpc_vmsg *req_iov, struct arpc_vmsg *rsp_iov, void* usr_context);
+
+	/*! @brief step3, 释放回复消息的资源。*/
+	int (*release_rsp_cb)(struct arpc_vmsg *rsp_iov, void* usr_context);
+
+	/*! @brief step4, 异步处理调用者buf数据。*/
+	int (*proc_async_cb)(const struct arpc_vmsg *req_iov, void* usr_context);
+};
+
+/**
+ * @brief  回复消息操作函数
+ *
+ * @details
+ *  	回复的消息一般是发起request的一方自定义了回调处理，不需要在框架注册数据处理函数
+ */
+struct respone_ops {
+	void* (*alloc_cb)(uint32_t size, void* usr_context);
+	int (*free_cb)(void* buf_ptr, void* usr_context);
+};
+
+/**
+ * @brief  单向消息操作函数
+ *
+ * @details
+ *  	由于单向消息不需要框架自动回复消息给请求方，不需要注册释放函数《release_rsp_cb》
+ */
+struct oneway_ops {
+	void* (*alloc_cb)(uint32_t size, void* usr_context);
+	int (*free_cb)(void* buf_ptr, void* usr_context);
+	int (*proc_head_cb)(struct arpc_header_msg *header, void* usr_context, uint32_t *flag);
+	int (*proc_data_cb)(const struct arpc_vmsg *req_iov, struct arpc_vmsg *rsp_iov, void* usr_context);
+	int (*proc_async_cb)(const struct arpc_vmsg *req_iov, void* usr_context);
+};
+
+/**
+ * @brief  消息操作函数合集
+ *
+ * @details
+ *  	只要建立起一个session,就需要注册三种消息体对应的操作函数
+ */
+struct arpc_session_ops {
+	struct request_ops			req_ops;
+	struct respone_ops			rsp_ops;
+	struct oneway_ops			oneway_ops;	
+};
+
+
+
+#define PRIVATE_HANDLE	char handle[0]						/*! @brief 私用数据段声明 */
+
+#define MAX_HEADER_DATA_LEN 1024							/*! @brief 消息体头部最大长度 */
+#define DATA_DEFAULT_MAX_LEN  16*1024						/*! @brief 消息体数据段最大长度 */
+#define IOV_DEFAULT_MAX_LEN   1024							/*! @brief 数据每个IOV最长长度 */
+
+/**
+ * @brief  session消息体实例化参数
+ *
+ * @details
+ *  	消息体是session数据收发的基础结构，需要先实例化
+ */
+struct arpc_msg_param{
+	void* (*alloc_cb)(uint32_t size, void* usr_context);
+	int   (*free_cb)(void* buf_ptr, void* usr_context);
+	void 		*usr_context;								/*! @brief 用户上下文 */
+	uint32_t 	flag;										/*! @brief 预留参数 */
+};
+
+/**
+ * @brief  session消息结构体
+ *
+ * @details
+ *  	每个session发送请求前，都需要向消息框架申请一个消息体，利用消息体发送数据。
+ * 		由于session是异步发送，数据发送完毕和收到对应的数据都输通过异步通知的方式，
+ * 		消息体除了需要用于异步发送数据，还需要用于异步回复消息的接收。
+ */
+struct arpc_msg{
+
+	/*! @brief 待发送的数据， 异步发送，如果未设置clean_send_cb回调则会阻塞到发送完毕。*/
+	struct arpc_vmsg	send;
+
+	/*! @brief 发送完毕后回调，用于清理发送的资源 */
+	int (*clean_send_cb)(struct arpc_vmsg *send, void* usr_ctx);
+
+	/*! @brief 待接受的消息数据， 消息框架会自动把send的对应的回复消息放置到这里 */
+	struct arpc_vmsg	receive;
+
+	/*! @brief 接收到回复消息后， 用于处理发送的数据 */
+	int (*proc_rsp_cb)(struct arpc_vmsg *rsp, void *usr_ctx);
+
+	/*! @brief 消息框架内部实例化私有数据，对调用者不可见 */
+	PRIVATE_HANDLE;
+};
+
+/*! 
+ * @brief 申请一个消息体
+ * 
+ * 向消息框架申请一个消息体，会分配内部内存。
+ * 若调用者设置内存分配操作，则会根据用户参数自动为回复消息分配内存
+ * 
+ * @param[in] p 消息体参数,可以为空，则采用默认方式新建消息体
+ * @return  arpc_session_handle_t; (<em>NULL</em>: fail ; ( <em>非NULL</em>: succeed
+ */
+struct arpc_msg *arpc_new_msg(const struct arpc_msg_param *p);
+
+/*! 
+ * @brief 释放一个消息体
+ * 
+ * 释放分配的内存；
+ * 注意：如果消息体处在发送待接收状态，即框架锁定，则会释放不成功，必须等待消息框架释放消息体。
+ * 		消息框架会确保消息体不会长期持有的，消息超时或者发送失败都是自动释放消息体
+ * 
+ * @param[inout] msg ,消息体指针的指针，如果释放成功，则句柄将会被置空
+ * @return  int; (<em>-1</em>: fail ; ( <em>0</em>: succeed
+ */
+int arpc_delete_msg(struct arpc_msg **msg);
+
+/*! 
+ * @brief 重置一个消息体
+ * 
+ * 重复利用一个消息体，避免发送数据不断申请资源。
+ * 注意：处在发送状态的消息体无法重置，重置是用于释放接收回复消息的缓存buff
+ * 
+ * @param[in] msg ,消息体指针
+ * @return  int; (<em>-1</em>: fail ; ( <em>0</em>: succeed
+ */
+int arpc_msg_reset(struct arpc_msg *msg);
+
+
+/*! 
+ * @brief 发送请求
+ * 
+ * 发送一个请求等待回复（发送消息并阻塞等待接收方回复）
+ * 
+ * @param[in] fd ,a session handle
+ * @param[in] msg ,a data that will send
+ * @param[in] timeout_ms , 超时时间， -1则一直等待，若设置回调，则该值不生效，直接返回
+ * @return receive .0,表示发送成功，小于0则失败
+ */
+int arpc_do_request(const arpc_session_handle_t fd, struct arpc_msg *msg, int32_t timeout_ms);
+
+/*! 
+ * @brief 发送单向消息
+ * 
+ * 发送一个单向消息（接收方无需回复）
+ * 
+ * @param[in] fd ,a session handle
+ * @param[in] msg ,a data that will send
+ * @return receive .0,表示发送成功，小于0则失败
+ */
+int arpc_send_oneway_msg(const arpc_session_handle_t fd, struct arpc_msg *msg);
+
+/**********************************************************************************************
+ * @name client
+ * @brif clien 客户端
+ **********************************************************************************************/
+#ifdef _DEF_SESSION_CLIENT
+
+#define MAX_SESSION_REQ_DATA_LEN  1024								/*! @brief 申请session的数据长度 */
+
+/**
+ * @brief  客户端session实例化参数
+ *
+ * @details
+ *  	用于实例化客户端session的参数
+ */
+struct arpc_client_session_param {
+	struct arpc_con_info  		con;								/*! @brief 每个连接的传输类型和参数 */
+	struct arpc_session_ops		*ops;								/*! @brief 请求回复的回调函数 */
+	void 						*ops_usr_ctx;						/*! @brief 调用者的上下文参数，用于操作函数入参 */
+	uint32_t					req_data_len;						/*! @brief 申请session时的数据 */
+	void						*req_data;							/*! @brief 调用者新建session请求时，发给服务端数据 */
+};
+
+/*!
+ *  @brief  创建session客户端实例
+ *
+ *  @param[in] param  session服务端实例化的参数
+ *  @return  arpc_session_handle_t; (<em>NULL</em>: fail ; ( <em>非NULL</em>: succeed
+ *
+ */
+arpc_session_handle_t arpc_client_create_session(const struct arpc_client_session_param *param);
+
+/*!
+ *  @brief  销毁session客户端实例
+ *
+ *  @param[in] fd  session句柄
+ *  @return  int; (<em>-1</em>: fail ; ( <em>0</em>: succeed
+ *
+ */
+int arpc_client_destroy_session(arpc_session_handle_t *fd);
+
+/**
+ * @brief  session状态枚举
+ *
+ * @details
+ *  	用于获取session状态
+ */
+enum arpc_session_status {
+	ARPC_SESSION_STA_NOT_EXISTED = -1,							/*! @brief session不存在或者已经释放 */
+	ARPC_SESSION_STA_ACTIVE = 0,								/*! @brief 正常活跃 */
+	ARPC_SESSION_STA_RE_CON,									/*! @brief 断路，尝试重连 */
+	ARPC_SESSION_STA_WAIT,										/*! @brief 断路，周期尝试重连 */
+};
+
+/*!
+ *  @brief  获取session状态
+ *
+ *  @param[in] fd  session句柄
+ *  @return  arpc_session_status;
+ *
+ */
+enum arpc_session_status arpc_get_session_status(const arpc_session_handle_t fd);
+
+#endif
+
+
+#ifdef _DEF_SESSION_SERVER
+
+/*!
+ * @brief  新建session请求消息
+ *
+ * @details
+ *  该状态是由client端发给server端,用于请求新建session
+ *  
+ */
+struct arpc_new_session_req{
+	uint64_t						session_id;
+	struct arpc_con_info 			client_con_info;
+	struct arpc_iov 				client_data;
+};
+
+/*!
+ * @brief  新建session的状态
+ *
+ * @details
+ *  该状态是由server端发给client端,用于应答新建session状态
+ *  
+ */
+enum arpc_new_session_status{
+	ARPC_E_STATUS_OK = 0,
+	ARPC_E_STATUS_INVALID_USER, 								/*! @brief 非法用户 */
+};
+
+/*!
+ * @brief  新建session回复消息
+ *
+ * @details
+ *  该状态是由server端发给client端,用于回复新建session的结果
+ *  
+ */
+struct arpc_new_session_rsp{
+	void 							*rsp_data;
+	uint32_t						rsp_data_len;
+	enum arpc_new_session_status	ret_status;
+	struct arpc_session_ops			*ops;
+	void							*ops_new_ctx;				
+};
+
+/*!
+ *  @brief session服务端实例化参数
+ *
+ * @details
+ *   参数用于配置session功能
+ *
+ */
+struct arpc_server_param {
+	/*! @brief 每个连接的传输类型和参数 */
+	struct arpc_con_info 	   		con;
+	
+	/*! @brief 收到申请建立session请求时回调，用于处理调用者逻辑和输出回复消息*/
+	int (*new_session_start)(const struct arpc_new_session_req *, struct arpc_new_session_rsp *, void*);
+
+	/*! @brief 消息框架新建session后回调，用于释放调用者回复消息的资源*/
+	int (*new_session_end)(arpc_session_handle_t, struct arpc_new_session_rsp *, void*);
+
+	/*! @brief session服务端默认的消息操作函数 */
+	struct arpc_session_ops			default_ops;
+
+	/*! @brief 用户上下文数据，作为消息处理函数的入参 */
+	void 							*default_ops_usr_ctx;
+
+	/*! @brief IOV数据深度 选填*/
+	uint32_t						iov_max_len;
+};
+
+/*!
+ *  @brief  创建session服务端实例
+ *
+ *  @param[in] param  session服务端实例化的参数
+ *  @return  int; (<em>NULL</em>: fail ; ( <em>非NULL</em>: succeed
+ *
+ */
+arpc_server_t arpc_server_create(const struct arpc_server_param *param);
+
+/*!
+ *  @brief  监听session建立请求
+ *
+ *  @param[in] fd  session服务端实例化的参数
+ *  @param[in] timeout_ms  服务端消息框架阻塞超时时间，-1表示一直阻塞，永不超时。
+ *  @return  int; (<em>NULL</em>: fail ; ( <em>非NULL</em>: succeed
+ *
+ */
+int arpc_server_loop(arpc_server_t fd, int32_t timeout_ms);
+
+/*!
+ *  @brief  释放session服务端实例
+ *
+ *  @param[inout] fd  session服务端实例化的参数, 释放成功，则句柄会被置空
+ *  @return  int; (<em>NULL</em>: fail ; ( <em>非NULL</em>: succeed
+ *
+ */
+int arpc_server_destroy(arpc_server_t *fd);
+
+#endif
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /*XIO_API_H */
