@@ -103,8 +103,8 @@ int main(int argc, char *argv[])
 		if (requst->send.vec[i].len < send_len){
 			printf("fread len fail\n");
 		}
-		//ret = arpc_do_request(session_fd, requst, -1);
-		ret = arpc_send_oneway_msg(session_fd, requst);
+		ret = arpc_do_request(session_fd, requst, -1);
+		//ret = arpc_send_oneway_msg(session_fd, requst);
 		//usleep(500*1000);
 		if (ret != 0){
 			printf("arpc_do_request fail\n");
@@ -119,8 +119,9 @@ int main(int argc, char *argv[])
 		requst->send.vec = NULL;
 		arpc_msg_reset(requst);
 	}
+	sleep(5);
 	arpc_delete_msg(&requst);
-	arpc_client_destroy_session(session_fd);
+	arpc_client_destroy_session(&session_fd);
 	printf("file send complete:%s.\n", file_path);
 end:
 	if (fp)

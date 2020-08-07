@@ -34,6 +34,8 @@ static struct aprc_paramter g_param= {
 	.thread_pool	= NULL,
 };
 
+static const char SERVER_DEFAULT[] = "rsp-header:undefine";
+
 int get_uri(const struct arpc_con_info *param, char *uri, uint32_t uri_len)
 {
 	const char *type = NULL, *ip=NULL;
@@ -137,7 +139,7 @@ _arpc_wait_request_rsp(struct arpc_msg_data* pri_msg, int32_t timeout_ms)
 
 
 struct _async_deal_msg_param{
-	struct xio_msg 			*oneway_msg;
+	struct xio_msg 			*msg;
 	struct arpc_vmsg 		rev_iov;
 	struct _async_proc_ops	ops;
 	void					*usr_ctx;
@@ -147,21 +149,30 @@ static int _msg_async_deal(void *usr_ctx)
 {
 	struct _async_deal_msg_param *async = (struct _async_deal_msg_param *)usr_ctx;
 	uint32_t i;
+	struct arpc_vmsg rsp_iov;
+
 	ARPC_LOG_DEBUG("Note: msg deal on thread[%lu]...", pthread_self());// to do
 	if (!async){
 		ARPC_LOG_ERROR("usr_ctx null, exit.");// to do
 		return 0;
 	}
-	LOG_THEN_RETURN_VAL_IF_TRUE((!async->ops.proc_async_cb), ARPC_ERROR, "proc_async_cb null.");
-	async->ops.proc_async_cb(&async->rev_iov, async->usr_ctx);
+	LOG_THEN_RETURN_VAL_IF_TRUE((!async->ops.proc_async_cb && !async->ops.proc_oneway_async_cb), 
+								ARPC_ERROR, "proc_async_cb null.");
+	if (async->ops.proc_async_cb && async->ops.release_rsp_cb){
+		memset(&rsp_iov, 0, sizeof (struct arpc_vmsg));
+		async->ops.proc_async_cb(&async->rev_iov, &rsp_iov, async->usr_ctx);
+		if (_do_respone(&rsp_iov, async->msg)) {
+			ARPC_LOG_ERROR("_do_respone fail.");// to do
+		}
+	}else if (async->ops.proc_oneway_async_cb) {
+		async->ops.proc_oneway_async_cb(&async->rev_iov, async->usr_ctx);
+	}else{
+		ARPC_LOG_ERROR("proc_async_cb invalid, exit.");// to do
+	}
 
 	// 释放资源
 	TO_FREE_USER_DATA_BUF(async->ops.free_cb, async->usr_ctx, async->rev_iov.vec, async->rev_iov.vec_num, i);
-	
-	if (async->oneway_msg){
-		xio_release_msg(async->oneway_msg);
-		async->oneway_msg = NULL;
-	}
+
 	// free
 	if (async->rev_iov.head)
 		ARPC_MEM_FREE(async->rev_iov.head, NULL);
@@ -174,7 +185,7 @@ static int _msg_async_deal(void *usr_ctx)
 	return 0;
 }
 
-int _post_iov_to_async_thread(struct arpc_vmsg *iov, struct xio_msg *oneway_msg, struct _async_proc_ops *ops, void *usr_ctx)
+int _post_iov_to_async_thread(struct arpc_vmsg *iov, struct xio_msg *msg, struct _async_proc_ops *ops, void *usr_ctx)
 {
 	struct _async_deal_msg_param *async;
 	struct tp_thread_work thread;
@@ -182,7 +193,10 @@ int _post_iov_to_async_thread(struct arpc_vmsg *iov, struct xio_msg *oneway_msg,
 
 	LOG_THEN_RETURN_VAL_IF_TRUE((!iov->head_len && !iov->vec_num), ARPC_ERROR, "invalid in of iov.");
 
-	LOG_THEN_RETURN_VAL_IF_TRUE((!ops->free_cb || !ops->proc_async_cb), ARPC_ERROR, "ops invalid.");
+	LOG_THEN_RETURN_VAL_IF_TRUE((!ops->free_cb), ARPC_ERROR, "ops free invalid.");
+
+	LOG_THEN_RETURN_VAL_IF_TRUE((!ops->proc_async_cb && !ops->proc_oneway_async_cb), 
+								ARPC_ERROR, "ops proc_data invalid.");
 	/* 线程池申请资源*/
 	async = (struct _async_deal_msg_param*)ARPC_MEM_ALLOC(sizeof(struct _async_deal_msg_param), NULL);
 	if (!async){
@@ -195,7 +209,7 @@ int _post_iov_to_async_thread(struct arpc_vmsg *iov, struct xio_msg *oneway_msg,
 	async->rev_iov.total_data = iov->total_data;
 	async->rev_iov.vec_num = iov->vec_num;
 	async->rev_iov.vec = iov->vec;
-	async->oneway_msg = oneway_msg;
+	async->msg = msg;
 	// deep copy;
 	if (iov->head_len) {
 		async->rev_iov.head = (void*)ARPC_MEM_ALLOC(iov->head_len, NULL);
@@ -332,5 +346,47 @@ int _clean_header_source(struct xio_msg *msg, mem_free_cb_t free_cb, void *usr_c
 	vmsg_sglist_set_nents(&msg->in, 0);
 	msg->in.sgl_type	= XIO_SGL_TYPE_IOV_PTR;
 	CLR_FLAG(msg->usr_flags, METHOD_ALLOC_DATA_BUF);
+	return 0;
+}
+
+int _do_respone(struct arpc_vmsg *rsp_iov, struct xio_msg  *req)
+{
+	struct xio_msg  	*rsp_msg;
+	uint32_t			i;
+
+	rsp_msg = (struct xio_msg*)ARPC_MEM_ALLOC(sizeof(struct xio_msg), NULL); // todo queue
+	memset(rsp_msg, 0, sizeof(struct xio_msg));
+	if(rsp_iov && rsp_iov->head){
+		ARPC_LOG_DEBUG("rsp  header.");
+		rsp_msg->out.header.iov_base = rsp_iov->head;
+		rsp_msg->out.header.iov_len  = rsp_iov->head_len;
+	}else{
+		rsp_msg->out.header.iov_base = (char*)SERVER_DEFAULT;
+		rsp_msg->out.header.iov_len  = sizeof(SERVER_DEFAULT);
+		rsp_msg->out.sgl_type = XIO_SGL_TYPE_IOV_PTR;
+		vmsg_sglist_set_nents(&rsp_msg->out, 0);
+	}
+
+	if (rsp_iov && rsp_iov->vec && rsp_iov->total_data && rsp_iov->vec_num) {
+		ARPC_LOG_DEBUG("rsp  data.");
+		rsp_msg->out.total_data_len  = rsp_iov->total_data;
+		rsp_msg->out.sgl_type = XIO_SGL_TYPE_IOV_PTR;
+		rsp_msg->out.pdata_iov.sglist = ARPC_MEM_ALLOC(rsp_iov->vec_num * sizeof(struct xio_iovec_ex), NULL);
+		for (i = 0; i < rsp_iov->vec_num; i++){
+			rsp_msg->out.pdata_iov.sglist[i].iov_base = rsp_iov->vec[i].data;
+			rsp_msg->out.pdata_iov.sglist[i].iov_len = rsp_iov->vec[i].len;
+			rsp_msg->out.pdata_iov.sglist[i].mr = NULL;
+			rsp_msg->out.pdata_iov.sglist[i].user_context = NULL;
+		}
+		rsp_msg->out.pdata_iov.max_nents = rsp_iov->vec_num;
+		vmsg_sglist_set_nents(&rsp_msg->out, rsp_iov->vec_num);
+		rsp_msg->user_context = (void*)rsp_iov->vec;
+		SET_FLAG(rsp_msg->usr_flags, FLAG_RSP_USER_DATA);
+	}
+
+	rsp_msg->request = req;
+	ARPC_LOG_DEBUG("rsp  data.");
+	xio_send_response(rsp_msg);
+	ARPC_LOG_DEBUG("rsp  end.");
 	return 0;
 }

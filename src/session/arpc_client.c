@@ -391,6 +391,7 @@ int arpc_client_destroy_session(arpc_session_handle_t *fd)
 	struct arpc_client_session_data *x_data = NULL;
 	struct arpc_handle_ex *_fd = (struct arpc_handle_ex *)*fd;
 	if(!_fd){
+		ARPC_LOG_ERROR( "fd is null.");
 		return ARPC_ERROR;
 	}
 	pthread_mutex_lock(&_fd->lock);

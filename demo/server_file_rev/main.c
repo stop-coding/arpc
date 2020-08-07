@@ -109,7 +109,61 @@ int new_session_end(arpc_session_handle_t fd, struct arpc_new_session_rsp *param
 }
 
 
-static int process_async(const struct arpc_vmsg *req_iov, void* usr_context)
+static int process_async(const struct arpc_vmsg *req_iov, struct arpc_vmsg *rsp_iov, void* usr_context)
+{
+	FILE *fp = NULL;
+	char file_path[512] = {0};
+	uint32_t i;
+	if (!req_iov || !usr_context){
+		printf("null inputn");
+		return 0;
+	}
+	sprintf(file_path, "./rev_%s", (char *)usr_context);
+
+	printf("----dddd--file:%s, receive len:%lu.\n", file_path, req_iov->total_data);
+
+	fp = fopen(file_path, "ab");
+	if (!fp){
+		printf("fopen path:%s fail.\n", file_path);
+		return 0;
+	}
+	for(i = 0; i < req_iov->vec_num; i++){
+		fwrite(req_iov->vec[i].data, 1, req_iov->vec[i].len, fp);
+		fseek(fp, 0, SEEK_END);
+	}
+	fclose(fp);
+	sleep(3);
+	printf("----dddd--end.\n");
+	return 0;
+}
+static int process_rx_oneway_data(const struct arpc_vmsg *req_iov, void *usr_context)
+{
+	char file_path[512] = {0};
+	FILE *fp = NULL;
+	uint32_t i;
+
+	if (!req_iov || !usr_context){
+		printf("null inputn");
+		return 0;
+	}
+	sprintf(file_path, "./rev_%s", (char *)usr_context);
+
+	printf("------file:%s, receive len:%lu.\n", file_path, req_iov->total_data);
+
+	fp = fopen(file_path, "ab");
+	if (!fp){
+		printf("fopen path:%s fail.\n", file_path);
+		return 0;
+	}
+	for(i = 0; i < req_iov->vec_num; i++){
+		fwrite(req_iov->vec[i].data, 1, req_iov->vec[i].len, fp);
+		fseek(fp, 0, SEEK_END);
+	}
+	fclose(fp);
+	return 0;
+}
+
+static int process_oneway_async(const struct arpc_vmsg *req_iov, void* usr_context)
 {
 	FILE *fp = NULL;
 	char file_path[512] = {0};
@@ -154,8 +208,8 @@ int main(int argc, char *argv[])
 			.alloc_cb = &mem_alloc,
 			.free_cb = &mem_free,
 			.proc_head_cb = &process_rx_header,
-			.proc_data_cb = &process_rx_data,
-			.proc_async_cb = NULL,
+			.proc_data_cb = &process_rx_oneway_data,
+			.proc_async_cb = &process_oneway_async,
 		}
 	};
 

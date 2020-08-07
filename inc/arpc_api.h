@@ -90,6 +90,18 @@ struct arpc_iov{
 };
 
 /**
+ * @brief  消息头信息
+ *
+ * @details
+ *  	收到请求消息时，先读取消息头，执行回调函数后，在继续接收消息体
+ */
+struct arpc_header_msg{
+	uint32_t		head_len;								/*! @brief 头部长度 */
+	void			*head;									/*! @brief 头部数据 */
+	uint64_t		data_len;								/*! @brief 数据全部长度 */
+};
+
+/**
  * @brief  arpc基础消息结构
  *
  * @details
@@ -126,18 +138,6 @@ typedef int (*mem_free_cb_t)(void* buf_ptr, void* usr_context);
 #define CLR_ALL_METHOD(flag) (flag=0)						/*! @brief 清除全部方法 */
 
 /**
- * @brief  消息头信息
- *
- * @details
- *  	收到请求消息时，先读取消息头，执行回调函数后，在继续接收消息体
- */
-struct arpc_header_msg{
-	uint32_t		head_len;								/*! @brief 头部长度 */
-	void			*head;									/*! @brief 头部数据 */
-	uint64_t		data_len;								/*! @brief 数据全部长度 */
-};
-
-/**
  * @brief  请求消息操作函数
  *
  * @details
@@ -149,17 +149,17 @@ struct request_ops {
 	void* (*alloc_cb)(uint32_t size, void* usr_context);
 	int (*free_cb)(void* buf_ptr, void* usr_context);
 
-	/*! @brief step1, 处理消息头，获取数据体参数（如预分配内存） */
+	/*! @brief step1, 处理消息头，获取数据体参数（如预分配内存，异步处理设置） */
 	int (*proc_head_cb)(struct arpc_header_msg *header, void* usr_context, uint32_t *flag);
 
-	/*! @brief step2, 已接收数据到指定的buf里，处理数据。*/
+	/*! @brief step2, 同步处理用户的数据，如果是同步，则异步不执行。*/
 	int (*proc_data_cb)(const struct arpc_vmsg *req_iov, struct arpc_vmsg *rsp_iov, void* usr_context);
+
+	/*! @brief step4, 异步处理调用者buf数据。*/
+	int (*proc_async_cb)(const struct arpc_vmsg *req_iov, struct arpc_vmsg *rsp_iov, void* usr_context);
 
 	/*! @brief step3, 释放回复消息的资源。*/
 	int (*release_rsp_cb)(struct arpc_vmsg *rsp_iov, void* usr_context);
-
-	/*! @brief step4, 异步处理调用者buf数据。*/
-	int (*proc_async_cb)(const struct arpc_vmsg *req_iov, void* usr_context);
 };
 
 /**
@@ -183,7 +183,7 @@ struct oneway_ops {
 	void* (*alloc_cb)(uint32_t size, void* usr_context);
 	int (*free_cb)(void* buf_ptr, void* usr_context);
 	int (*proc_head_cb)(struct arpc_header_msg *header, void* usr_context, uint32_t *flag);
-	int (*proc_data_cb)(const struct arpc_vmsg *req_iov, struct arpc_vmsg *rsp_iov, void* usr_context);
+	int (*proc_data_cb)(const struct arpc_vmsg *req_iov, void* usr_context);
 	int (*proc_async_cb)(const struct arpc_vmsg *req_iov, void* usr_context);
 };
 
