@@ -1,0 +1,5 @@
+[gerrit]
+host=172.24.37.53
+port=29418
+project=arpc.git
+
