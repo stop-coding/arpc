@@ -73,8 +73,11 @@ int _process_request_data(struct xio_msg *req,
 		}else{
 			goto do_respone;
 		}
-	}else if( IS_SET(req->usr_flags, METHOD_ALLOC_DATA_BUF) && 
-		ops->free_cb && ops->proc_async_cb && ops->release_rsp_cb){
+	}else if(ops->free_cb && ops->proc_async_cb && ops->release_rsp_cb){
+		if (!IS_SET(req->usr_flags, METHOD_ALLOC_DATA_BUF) && nents) {
+			ARPC_LOG_ERROR("caller don't alloc buf to rx data, can't proc async fail.");
+			goto free_user_buf;
+		}
 		async_ops.alloc_cb = ops->alloc_cb;
 		async_ops.free_cb = ops->free_cb;
 		async_ops.proc_async_cb = ops->proc_async_cb;
