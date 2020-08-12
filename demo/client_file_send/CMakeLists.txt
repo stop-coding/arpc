@@ -28,5 +28,5 @@ LINK_DIRECTORIES(${LIBRARY_OUTPUT_PATH} ${LINK_LIB_PATH})
 add_executable(client_file ${SOURCE_FILES})
 
 target_link_libraries(client_file -larpc -lnuma -ldl -lrt -lpthread)
-add_dependencies(client_file aprc)
+
 

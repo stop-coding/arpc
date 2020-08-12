@@ -149,7 +149,8 @@ static int _msg_async_deal(void *usr_ctx)
 {
 	struct _async_deal_msg_param *async = (struct _async_deal_msg_param *)usr_ctx;
 	uint32_t i;
-	struct arpc_vmsg rsp_iov;
+	struct arpc_rsp rsp;
+	int ret;
 
 	ARPC_LOG_DEBUG("Note: msg deal on thread[%lu]...", pthread_self());// to do
 	if (!async){
@@ -158,11 +159,13 @@ static int _msg_async_deal(void *usr_ctx)
 	}
 	LOG_THEN_RETURN_VAL_IF_TRUE((!async->ops.proc_async_cb && !async->ops.proc_oneway_async_cb), 
 								ARPC_ERROR, "proc_async_cb null.");
+	memset(&rsp, 0, sizeof (struct arpc_rsp));
+	rsp.rsp_fd = (void*)async->msg;							
 	if (async->ops.proc_async_cb && async->ops.release_rsp_cb){
-		memset(&rsp_iov, 0, sizeof (struct arpc_vmsg));
-		async->ops.proc_async_cb(&async->rev_iov, &rsp_iov, async->usr_ctx);
-		if (_do_respone(&rsp_iov, async->msg)) {
-			ARPC_LOG_ERROR("_do_respone fail.");// to do
+		async->ops.proc_async_cb(&async->rev_iov, &rsp, async->usr_ctx);
+		if (!IS_SET(rsp.flags, METHOD_CALLER_ASYNC)) {
+			ret = _do_respone(&rsp.rsp_iov, async->msg, async->ops.release_rsp_cb, async->usr_ctx);
+			LOG_ERROR_IF_VAL_TRUE(ret, "_do_respone fail.");
 		}
 	}else if (async->ops.proc_oneway_async_cb) {
 		async->ops.proc_oneway_async_cb(&async->rev_iov, async->usr_ctx);
@@ -170,9 +173,10 @@ static int _msg_async_deal(void *usr_ctx)
 		ARPC_LOG_ERROR("proc_async_cb invalid, exit.");// to do
 	}
 
-	// 释放资源
-	TO_FREE_USER_DATA_BUF(async->ops.free_cb, async->usr_ctx, async->rev_iov.vec, async->rev_iov.vec_num, i);
-
+	if (!IS_SET(rsp.flags, METHOD_CALLER_HIJACK_RX_DATA)) {
+		// 释放资源
+		TO_FREE_USER_DATA_BUF(async->ops.free_cb, async->usr_ctx, async->rev_iov.vec, async->rev_iov.vec_num, i);
+	}
 	// free
 	if (async->rev_iov.head)
 		ARPC_MEM_FREE(async->rev_iov.head, NULL);
@@ -349,44 +353,55 @@ int _clean_header_source(struct xio_msg *msg, mem_free_cb_t free_cb, void *usr_c
 	return 0;
 }
 
-int _do_respone(struct arpc_vmsg *rsp_iov, struct xio_msg  *req)
+int _do_respone(struct arpc_vmsg *rsp_iov, struct xio_msg  *req, rsp_cb_t release_rsp_cb, void *rsp_ctx)
 {
 	struct xio_msg  	*rsp_msg;
+	struct _rsp_complete_ctx *rsp_com_ctx;
 	uint32_t			i;
 
 	rsp_msg = (struct xio_msg*)ARPC_MEM_ALLOC(sizeof(struct xio_msg), NULL); // todo queue
 	memset(rsp_msg, 0, sizeof(struct xio_msg));
-	if(rsp_iov && rsp_iov->head){
-		ARPC_LOG_DEBUG("rsp  header.");
+
+	rsp_com_ctx = (struct _rsp_complete_ctx*)ARPC_MEM_ALLOC(sizeof(struct _rsp_complete_ctx), NULL);
+	memset(rsp_com_ctx, 0, sizeof(struct _rsp_complete_ctx));
+	rsp_com_ctx->release_rsp_cb = release_rsp_cb;
+	rsp_com_ctx->rsp_usr_ctx = rsp_ctx;
+
+	if(rsp_iov && rsp_iov->head && rsp_iov->head_len){
+		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!release_rsp_cb, rsp_default, "release_rsp_cb is null ,can't send user rsp data.");
 		rsp_msg->out.header.iov_base = rsp_iov->head;
 		rsp_msg->out.header.iov_len  = rsp_iov->head_len;
-	}else{
-		rsp_msg->out.header.iov_base = (char*)SERVER_DEFAULT;
-		rsp_msg->out.header.iov_len  = sizeof(SERVER_DEFAULT);
-		rsp_msg->out.sgl_type = XIO_SGL_TYPE_IOV_PTR;
-		vmsg_sglist_set_nents(&rsp_msg->out, 0);
-	}
-
-	if (rsp_iov && rsp_iov->vec && rsp_iov->total_data && rsp_iov->vec_num) {
-		ARPC_LOG_DEBUG("rsp  data.");
-		rsp_msg->out.total_data_len  = rsp_iov->total_data;
-		rsp_msg->out.sgl_type = XIO_SGL_TYPE_IOV_PTR;
-		rsp_msg->out.pdata_iov.sglist = ARPC_MEM_ALLOC(rsp_iov->vec_num * sizeof(struct xio_iovec_ex), NULL);
-		for (i = 0; i < rsp_iov->vec_num; i++){
-			rsp_msg->out.pdata_iov.sglist[i].iov_base = rsp_iov->vec[i].data;
-			rsp_msg->out.pdata_iov.sglist[i].iov_len = rsp_iov->vec[i].len;
-			rsp_msg->out.pdata_iov.sglist[i].mr = NULL;
-			rsp_msg->out.pdata_iov.sglist[i].user_context = NULL;
+		if (rsp_iov->vec && rsp_iov->total_data && rsp_iov->vec_num) {
+			ARPC_LOG_DEBUG("rsp  data.");
+			rsp_msg->out.total_data_len  = rsp_iov->total_data;
+			rsp_msg->out.sgl_type = XIO_SGL_TYPE_IOV_PTR;
+			rsp_msg->out.pdata_iov.sglist = ARPC_MEM_ALLOC(rsp_iov->vec_num * sizeof(struct xio_iovec_ex), NULL);
+			for (i = 0; i < rsp_iov->vec_num; i++){
+				rsp_msg->out.pdata_iov.sglist[i].iov_base = rsp_iov->vec[i].data;
+				rsp_msg->out.pdata_iov.sglist[i].iov_len = rsp_iov->vec[i].len;
+				rsp_msg->out.pdata_iov.sglist[i].mr = NULL;
+				rsp_msg->out.pdata_iov.sglist[i].user_context = NULL;
+			}
+			rsp_msg->out.pdata_iov.max_nents = rsp_iov->vec_num;
+			vmsg_sglist_set_nents(&rsp_msg->out, rsp_iov->vec_num);
+			rsp_com_ctx->rsp_iov = rsp_iov;
+		}else{
+			rsp_msg->out.pdata_iov.max_nents = 0;
+			vmsg_sglist_set_nents(&rsp_msg->out, 0);
+			rsp_com_ctx->rsp_iov = NULL;
 		}
-		rsp_msg->out.pdata_iov.max_nents = rsp_iov->vec_num;
-		vmsg_sglist_set_nents(&rsp_msg->out, rsp_iov->vec_num);
-		rsp_msg->user_context = (void*)rsp_iov->vec;
 		SET_FLAG(rsp_msg->usr_flags, FLAG_RSP_USER_DATA);
+		goto rsp;
 	}
-
+rsp_default:
+	rsp_msg->out.header.iov_base = NULL;
+	rsp_msg->out.header.iov_len  = 0;
+	rsp_msg->out.sgl_type = XIO_SGL_TYPE_IOV_PTR;
+	vmsg_sglist_set_nents(&rsp_msg->out, 0);
+	CLR_FLAG(rsp_msg->usr_flags, FLAG_RSP_USER_DATA);
+rsp:	
 	rsp_msg->request = req;
-	ARPC_LOG_DEBUG("rsp  data.");
+	rsp_msg->user_context = (void*)rsp_com_ctx;
 	xio_send_response(rsp_msg);
-	ARPC_LOG_DEBUG("rsp  end.");
 	return 0;
 }

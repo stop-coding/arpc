@@ -60,11 +60,10 @@ int _process_oneway_data(struct xio_msg *req,
 	rev_iov.vec = (struct arpc_iov *)sglist;
 	rev_iov.total_data = req->in.total_data_len;
 	
-	if (!IS_SET(req->usr_flags, METHOD_PROCESS_ASYNC) && ops->proc_data_cb) {
+	if (IS_SET(req->usr_flags, METHOD_ARPC_PROC_SYNC) && ops->proc_data_cb) {
 		ret = ops->proc_data_cb(&rev_iov, usr_ctx);
 		LOG_ERROR_IF_VAL_TRUE((ret != ARPC_SUCCESS), "proc_data_cb fail.");
-	}else if(IS_SET(req->usr_flags, METHOD_ALLOC_DATA_BUF) && 
-		IS_SET(req->usr_flags, METHOD_PROCESS_ASYNC) &&
+	}else if(IS_SET(req->usr_flags, METHOD_ALLOC_DATA_BUF) &&
 		ops->free_cb && ops->proc_async_cb){
 		async_ops.alloc_cb = ops->alloc_cb;
 		async_ops.free_cb = ops->free_cb;

@@ -178,8 +178,8 @@ reject:
 	if(client_fd)
 		ARPC_MEM_FREE(client_fd, NULL);
 	client_fd = NULL;
-	server->new_session_end((arpc_session_handle_t)client_fd, &param, head->usr_context);
-	xio_reject(session, XIO_E_SESSION_ABORTED, NULL, 0); // 拒绝session请求
+	xio_reject(session, XIO_E_SESSION_ABORTED, param.rsp_data, param.rsp_data_len); // 拒绝session请求
+	server->new_session_end(NULL, &param, head->usr_context);
 	return -1;
 }
 

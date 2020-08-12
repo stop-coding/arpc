@@ -42,25 +42,15 @@ static int mem_free(void *buf_ptr, void *usr_context)
 static int process_rx_header(struct arpc_header_msg *header, void* usr_context, uint32_t *flag)
 {
 	SET_METHOD(*flag, METHOD_ALLOC_DATA_BUF);
-	SET_METHOD(*flag, METHOD_PROCESS_ASYNC);
 	return 0;
 }
 
-static int process_rx_data(const struct arpc_vmsg *req_iov, struct arpc_vmsg *rsp_iov, void *usr_context)
+static int process_rx_data(const struct arpc_vmsg *req_iov, struct arpc_rsp *rsp, void *usr_context)
 {
 	char file_path[512] = {0};
 	FILE *fp = NULL;
 	uint32_t i;
 	
-	if (rsp_iov){
-		rsp_iov->head = rsp_header;
-		rsp_iov->head_len = sizeof(rsp_header);
-
-		rsp_iov->vec_num = 0;
-		rsp_iov->vec = NULL;
-		rsp_iov->total_data = 0;
-	}
-
 	if (!req_iov || !usr_context){
 		printf("null inputn");
 		return 0;
@@ -109,7 +99,7 @@ int new_session_end(arpc_session_handle_t fd, struct arpc_new_session_rsp *param
 }
 
 
-static int process_async(const struct arpc_vmsg *req_iov, struct arpc_vmsg *rsp_iov, void* usr_context)
+static int process_async(const struct arpc_vmsg *req_iov, struct arpc_rsp *rsp, void* usr_context)
 {
 	FILE *fp = NULL;
 	char file_path[512] = {0};

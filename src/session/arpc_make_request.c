@@ -152,6 +152,26 @@ error:
 	return ARPC_ERROR;	
 }
 
+/*! 
+ * @brief 回复消息个请求方
+ * 
+ * 回复一个消息个请求方（只能是请求的消息才能回复）
+ * 
+ * @param[in] rsp_fd ,a rsp msg handle, 由接收到消息回复时获取
+ * @param[in] rsp_iov ,回复的消息
+ * @param[in] release_rsp_cb ,回复结束后回调函数，用于释放调用者的回复消息资源
+ * @param[in] rsp_cb_ctx , 回调函数调用者入参
+ * @return int .0,表示发送成功，小于0则失败
+ */
+int arpc_do_response(arpc_rsp_handle_t *rsp_fd, struct arpc_vmsg *rsp_iov, rsp_cb_t release_rsp_cb, void* rsp_cb_ctx)
+{
+	LOG_THEN_RETURN_VAL_IF_TRUE((!rsp_fd || !*rsp_fd), ARPC_ERROR, "rsp_fd is null.");
+	LOG_THEN_RETURN_VAL_IF_TRUE((!rsp_iov), ARPC_ERROR, "rsp_iov is null.");
+	LOG_THEN_RETURN_VAL_IF_TRUE((!release_rsp_cb), ARPC_ERROR, "rsp_iov is null.");
+	_do_respone(rsp_iov, (struct xio_msg *)*rsp_fd, release_rsp_cb, rsp_cb_ctx);
+	*rsp_fd = NULL;
+	return 0;
+}
 // 已加锁
 int _arpc_rev_request_head(struct xio_msg *in_rsp)
 {
@@ -326,8 +346,6 @@ static struct arpc_msg *_xio_create_arpc_msg(struct xio_msg *rsp_msg)
 	int 			ret = -1;
 
 	LOG_THEN_RETURN_VAL_IF_TRUE((!rsp_msg), NULL, "rsp_msg null, exit.");
-	LOG_THEN_RETURN_VAL_IF_TRUE((!rsp_msg->in.header.iov_base), NULL, "header null, exit.");
-	LOG_THEN_RETURN_VAL_IF_TRUE((!rsp_msg->in.header.iov_len), NULL, "header iov_len is 0.");
 	nents = vmsg_sglist_nents(&rsp_msg->in);
 
 	msg = (struct arpc_msg *)rsp_msg->user_context;
@@ -350,11 +368,15 @@ static struct arpc_msg *_xio_create_arpc_msg(struct xio_msg *rsp_msg)
 			msg->receive.vec[i].len	= sglist[i].iov_len;
 			msg->receive.total_data +=msg->receive.vec[i].len;
 		}
-	}else{
+	}else if (nents){
 		// 自定义buf，结构体可以强制转换
 		sglist = vmsg_base_sglist(&rsp_msg->in);
 		msg->receive.vec = (struct arpc_iov *)sglist;
 		msg->receive.vec_num = nents;
+	}else{
+		msg->receive.vec = 0;
+		msg->receive.vec_num = 0;
+		msg->receive.total_data = 0;
 	}
 
 end:

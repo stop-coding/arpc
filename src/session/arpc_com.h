@@ -134,7 +134,7 @@ struct arpc_msg_data {
 struct _async_proc_ops{
 	void* (*alloc_cb)(uint32_t size, void* usr_context);
 	int (*free_cb)(void* buf_ptr, void* usr_context);
-	int (*proc_async_cb)(const struct arpc_vmsg *req_iov, struct arpc_vmsg *rsp_iov, void* usr_context);
+	int (*proc_async_cb)(const struct arpc_vmsg *req_iov, struct arpc_rsp *rsp_iov, void* usr_context);
 	int (*release_rsp_cb)(struct arpc_vmsg *rsp_iov, void* usr_context);
 	int (*proc_oneway_async_cb)(const struct arpc_vmsg *, void* usr_context);
 };
@@ -143,6 +143,12 @@ struct _proc_header_func{
 	void* (*alloc_cb)(uint32_t size, void* usr_context);
 	int (*free_cb)(void* buf_ptr, void* usr_context);
 	int (*proc_head_cb)(struct arpc_header_msg *header, void* usr_context, uint32_t *flag);
+};
+
+struct _rsp_complete_ctx{
+	struct arpc_vmsg *rsp_iov;
+	int (*release_rsp_cb)(struct arpc_vmsg *rsp_iov, void* usr_context);
+	void *rsp_usr_ctx;
 };
 
 // base
@@ -161,7 +167,7 @@ int _arpc_wait_request_rsp(struct arpc_msg_data* pri_msg, int32_t timeout_ms);
 int _create_header_source(struct xio_msg *msg, struct _proc_header_func *ops, uint64_t iov_max_len, void *usr_ctx);
 int _clean_header_source(struct xio_msg *msg, mem_free_cb_t free_cb, void *usr_ctx);
 
-int _do_respone(struct arpc_vmsg *rsp_iov, struct xio_msg  *req);
+int _do_respone(struct arpc_vmsg *rsp_iov, struct xio_msg  *req, rsp_cb_t release_rsp_cb, void *rsp_ctx);
 
 // request
 int _process_request_header(struct xio_msg *msg, struct request_ops *ops, uint64_t iov_max_len, void *usr_ctx);

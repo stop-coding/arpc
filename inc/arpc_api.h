@@ -115,17 +115,36 @@ struct arpc_vmsg{
 	struct arpc_iov *vec;									/*! @brief vector */
 };
 
+/*! @brief rsp消息的资源操作句柄，只有收到request请求时才会分配该句柄 */
+typedef void *arpc_rsp_handle_t;
+
+/**
+ * @brief  arpc基础消息结构
+ *
+ * @details
+ *  	arpc对外提供的数据结构
+ */
+struct arpc_rsp{
+	uint32_t			flags;								/*! @brief 消息处理标记位,通过 SET_METHOD方法设置*/
+	struct arpc_vmsg 	rsp_iov;							/*! @brief 由调用者填充的回复的数据 */
+	arpc_rsp_handle_t   rsp_fd;								/*! @brief 消息回复句柄，用于arpc_do_respone接口*/
+};
+
 /*! 
  * @brief 内存释放函数
  * 
- * @param[in] size ,消息头长度
+ * @param[in] buf_ptr ,内存指针
  * @param[in] usr_context ,用户上下文，初始化时由调用者入参，由调用者使用
  * @return mem buf
  */
 typedef int (*mem_free_cb_t)(void* buf_ptr, void* usr_context);
 
-#define METHOD_ALLOC_DATA_BUF	0  							/*! @brief 申请自定义内存 */
-#define METHOD_PROCESS_ASYNC	1  							/*! @brief 异步处理 */
+
+#define METHOD_ALLOC_DATA_BUF			0  					/*! @brief 申请调用者自定义内存 */
+#define METHOD_ARPC_PROC_SYNC			1  					/*! @brief ARPC接收消息同步处理 。默认情况下异步处理，需要线程池支持*/
+#define METHOD_CALLER_ASYNC				2  					/*! @brief 转调用者异步处理，消息回复需要调用者自己显性调用 */
+#define METHOD_CALLER_HIJACK_RX_DATA	3  					/*! @brief 调用者劫持接收数据,buf需要调用者释放，ARPC框架不释放。*/
+															/*		   生效条件是必须用户分配内存 */
 
 /**
  * @brief  标记位操作方法
@@ -153,10 +172,10 @@ struct request_ops {
 	int (*proc_head_cb)(struct arpc_header_msg *header, void* usr_context, uint32_t *flag);
 
 	/*! @brief step2, 同步处理用户的数据，如果是同步，则异步不执行。*/
-	int (*proc_data_cb)(const struct arpc_vmsg *req_iov, struct arpc_vmsg *rsp_iov, void* usr_context);
+	int (*proc_data_cb)(const struct arpc_vmsg *req_iov, struct arpc_rsp *rsp, void* usr_context);
 
 	/*! @brief step4, 异步处理调用者buf数据。*/
-	int (*proc_async_cb)(const struct arpc_vmsg *req_iov, struct arpc_vmsg *rsp_iov, void* usr_context);
+	int (*proc_async_cb)(const struct arpc_vmsg *req_iov, struct arpc_rsp *rsp, void* usr_context);
 
 	/*! @brief step3, 释放回复消息的资源。*/
 	int (*release_rsp_cb)(struct arpc_vmsg *rsp_iov, void* usr_context);
@@ -214,8 +233,8 @@ struct arpc_session_ops {
  *  	消息体是session数据收发的基础结构，需要先实例化
  */
 struct arpc_msg_param{
-	void* (*alloc_cb)(uint32_t size, void* usr_context);
-	int   (*free_cb)(void* buf_ptr, void* usr_context);
+	void* (*alloc_cb)(uint32_t size, void* usr_context);	/*! @brief 用于接收rsp消息时分配内存，可选 */
+	int   (*free_cb)(void* buf_ptr, void* usr_context);		/*! @brief 内存释放 可选*/
 	void 		*usr_context;								/*! @brief 用户上下文 */
 	uint32_t 	flag;										/*! @brief 预留参数 */
 };
@@ -289,7 +308,7 @@ int arpc_msg_reset(struct arpc_msg *msg);
  * @param[in] fd ,a session handle
  * @param[in] msg ,a data that will send
  * @param[in] timeout_ms , 超时时间， -1则一直等待，若设置回调，则该值不生效，直接返回
- * @return receive .0,表示发送成功，小于0则失败
+ * @return int .0,表示发送成功，小于0则失败
  */
 int arpc_do_request(const arpc_session_handle_t fd, struct arpc_msg *msg, int32_t timeout_ms);
 
@@ -300,9 +319,25 @@ int arpc_do_request(const arpc_session_handle_t fd, struct arpc_msg *msg, int32_
  * 
  * @param[in] fd ,a session handle
  * @param[in] msg ,a data that will send
- * @return receive .0,表示发送成功，小于0则失败
+ * @return int .0,表示发送成功，小于0则失败
  */
 int arpc_send_oneway_msg(const arpc_session_handle_t fd, struct arpc_msg *msg);
+
+/*! @brief 调用者回复消息资源释放回调函数，用于回复消息发送完毕后执行资源释放 */
+typedef int (*rsp_cb_t)(struct arpc_vmsg *rsp_iov, void* rsp_cb_ctx);
+
+/*! 
+ * @brief 回复消息个请求方
+ * 
+ * 回复一个消息个请求方（只能是请求的消息才能回复）
+ * 
+ * @param[in] rsp_fd ,a rsp msg handle pointer, 由接收到消息回复时获取
+ * @param[in] rsp_iov ,回复的消息
+ * @param[in] release_rsp_cb ,回复结束后回调函数，用于释放调用者的回复消息资源
+ * @param[in] rsp_cb_ctx , 回调函数调用者入参,可选，可以是NULL
+ * @return int .0,表示发送成功, rsp_f会被置空; 小于0则失败，rsp_fd若不为空，需要再次回复
+ */
+int arpc_do_response(arpc_rsp_handle_t *rsp_fd, struct arpc_vmsg *rsp_iov, rsp_cb_t release_rsp_cb, void* rsp_cb_ctx);
 
 /**********************************************************************************************
  * @name client
@@ -392,8 +427,9 @@ struct arpc_new_session_req{
  *  
  */
 enum arpc_new_session_status{
-	ARPC_E_STATUS_OK = 0,
-	ARPC_E_STATUS_INVALID_USER, 								/*! @brief 非法用户 */
+	ARPC_E_STATUS_OK = 0,										/*! @brief session可正常建立*/
+	ARPC_E_STATUS_INVALID_USER, 								/*! @brief 非法用户，拒绝建立session */
+	ARPC_E_STATUS_UNKOWN_ERR, 									/*! @brief 未知错误，拒绝建立session */
 };
 
 /*!
@@ -406,9 +442,11 @@ enum arpc_new_session_status{
 struct arpc_new_session_rsp{
 	void 							*rsp_data;
 	uint32_t						rsp_data_len;
-	enum arpc_new_session_status	ret_status;
-	struct arpc_session_ops			*ops;
-	void							*ops_new_ctx;				
+	enum arpc_new_session_status	ret_status;					/*! @brief 应答当前新建session调用者返回值，ARPC_E_STATUS_OK是可以建立，其它则失败*/
+	struct arpc_session_ops			*ops;						/*! @brief 设置当前session的回调函数，可选，默认使用注册时回调函数*/
+	void							*ops_new_ctx;				/*! @brief 回调函数上下文参数 */
+	void							*private;					/*! @brief 调用者私有数据 */
+	uint32_t						private_len;				/*! @brief 调用者私有数据长度 */
 };
 
 /*!
@@ -423,15 +461,18 @@ struct arpc_server_param {
 	struct arpc_con_info 	   		con;
 	
 	/*! @brief 收到申请建立session请求时回调，用于处理调用者逻辑和输出回复消息*/
-	int (*new_session_start)(const struct arpc_new_session_req *, struct arpc_new_session_rsp *, void*);
+	int (*new_session_start)(const struct arpc_new_session_req *, struct arpc_new_session_rsp *, void *server_ctx);
 
 	/*! @brief 消息框架新建session后回调，用于释放调用者回复消息的资源*/
-	int (*new_session_end)(arpc_session_handle_t, struct arpc_new_session_rsp *, void*);
+	int (*new_session_end)(arpc_session_handle_t, struct arpc_new_session_rsp *, void *server_ctx);
+
+	/*! @brief server 服务的用户上下文 */
+	void 							*server_ctx;
 
 	/*! @brief session服务端默认的消息操作函数 */
 	struct arpc_session_ops			default_ops;
 
-	/*! @brief 用户上下文数据，作为消息处理函数的入参 */
+	/*! @brief 作为消息处理函数的入参 */
 	void 							*default_ops_usr_ctx;
 
 	/*! @brief IOV数据深度 选填*/
