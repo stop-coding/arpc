@@ -101,6 +101,13 @@ struct arpc_header_msg{
 	uint64_t		data_len;								/*! @brief 数据全部长度 */
 };
 
+/*! @brief 配置默认的VEC深度 */
+#define 	ARPC_VEC_MAX_NUM 		4
+
+enum arpc_vec_type {
+	ARPC_VEC_TYPE_PRT = 0,									/*! @brief 自定义指针，用户分配vec结构体 */
+	ARPC_VEC_TYPE_ARR										/*! @brief 数组，默认为ARPC_VEC_MAX_NUM定义的数量*/
+};
 /**
  * @brief  arpc基础消息结构
  *
@@ -112,7 +119,12 @@ struct arpc_vmsg{
 	void			*head;									/*! @brief 头部数据 */
 	uint64_t		total_data;								/*! @brief 数据全部长度 */
 	uint32_t 		vec_num;								/*! @brief IO vector数量 */
-	struct arpc_iov *vec;									/*! @brief vector */
+	enum arpc_vec_type	vec_type;							/*! @brief 默认为用户自定义分配 */
+	union{
+		struct arpc_iov *vec;								/*! @brief vector ，vec结构体需要用户自行分配*/
+		struct arpc_iov vec_arr[ARPC_VEC_MAX_NUM];			/*! @brief vector 默认分配一定的数据，解决每次需自行分配vec结构导致操作的麻烦*/
+	};
+	uint32_t 		vec_max_num;							/*! @brief vec结构体数量，默认为VEC_MAX_NUM*/
 };
 
 /*! @brief rsp消息的资源操作句柄，只有收到request请求时才会分配该句柄 */
