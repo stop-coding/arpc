@@ -384,11 +384,10 @@ int _do_respone(struct arpc_vmsg *rsp_iov, struct xio_msg  *req, rsp_cb_t releas
 			}
 			rsp_msg->out.pdata_iov.max_nents = rsp_iov->vec_num;
 			vmsg_sglist_set_nents(&rsp_msg->out, rsp_iov->vec_num);
-			rsp_com_ctx->rsp_iov = rsp_iov;
+			rsp_com_ctx->rsp_iov = *rsp_iov;
 		}else{
 			rsp_msg->out.pdata_iov.max_nents = 0;
 			vmsg_sglist_set_nents(&rsp_msg->out, 0);
-			rsp_com_ctx->rsp_iov = NULL;
 		}
 		SET_FLAG(rsp_msg->usr_flags, FLAG_RSP_USER_DATA);
 		goto rsp;

@@ -146,7 +146,7 @@ struct _proc_header_func{
 };
 
 struct _rsp_complete_ctx{
-	struct arpc_vmsg *rsp_iov;
+	struct arpc_vmsg rsp_iov;
 	int (*release_rsp_cb)(struct arpc_vmsg *rsp_iov, void* usr_context);
 	void *rsp_usr_ctx;
 };
