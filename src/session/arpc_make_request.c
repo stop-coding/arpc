@@ -459,9 +459,6 @@ error:
 		sglist = NULL;
 	}
 	/* receive 默认方式*/
-	rsp->in.sgl_type = XIO_SGL_TYPE_IOV;
-	vmsg_sglist_set_nents(&rsp->in, XIO_IOVLEN);
-	rsp->in.data_iov.max_nents = XIO_IOVLEN;
 	CLR_FLAG(pri_msg->flag ,XIO_MSG_ALLOC_BUF);
 	return -1;
 }
@@ -494,7 +491,7 @@ static int _free_buf_on_rsp_msg(struct xio_msg *rsp)
 	
 	// 出参
 	rsp->in.sgl_type = XIO_SGL_TYPE_IOV;
-	vmsg_sglist_set_nents(&rsp->in, XIO_IOVLEN);
+	vmsg_sglist_set_nents(&rsp->in, 0);
 	rsp->in.data_iov.max_nents = XIO_IOVLEN;
 	CLR_FLAG(pri_msg->flag ,XIO_MSG_ALLOC_BUF);
 end:	
