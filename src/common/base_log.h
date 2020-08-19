@@ -30,11 +30,11 @@ extern "C" {
 #define BASE_SUCCESS		 0
 
 #define BASE_DEBUG_ON
-#define BASE_LOG_ERROR(format, arg...) fprintf(stdout, 	"[ERROR]File:|%s|%d---"format"\n", __FUNCTION__, __LINE__, ##arg)
-#define BASE_LOG_NOTICE(format, arg...) fprintf(stdout, "[NOTICE]File:|%s|%d---"format"\n",__FUNCTION__, __LINE__, ##arg)
+#define BASE_LOG_ERROR(format, arg...) fprintf(stdout, 	"[ arpc ] [ ERROR ] %s|%d |File:%s---"format"\n",__FUNCTION__, __LINE__, __FILE__, ##arg)
+#define BASE_LOG_NOTICE(format, arg...) fprintf(stdout, "[ arpc ] [ NOTICE ] %s|%d |File:---"format"\n",__FUNCTION__, __LINE__, ##arg)
 
 #ifdef BASE_DEBUG_ON
-#define BASE_LOG_DEBUG(format, arg...) fprintf(stdout, "[DEBUG]File:|%s|%d---"format"\n",__FUNCTION__, __LINE__, ##arg)
+#define BASE_LOG_DEBUG(format, arg...) fprintf(stdout, "[ arpc ] [ DEBUG ] %s|%d |File: ---"format"\n",__FUNCTION__, __LINE__, ##arg)
 #else
 #define BASE_LOG_DEBUG(format, arg...)
 #endif

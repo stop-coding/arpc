@@ -74,8 +74,9 @@ int arpc_delete_msg(struct arpc_msg **msg)
 	}
 	pri_msg = (struct arpc_msg_data*)(*msg)->handle;
 	pthread_mutex_lock(&pri_msg->lock);
-	if(IS_SET(pri_msg->flag, XIO_MSG_REQ) || IS_SET(pri_msg->flag, XIO_MSG_RSP)){
+	if(IS_SET(pri_msg->flag, XIO_MSG_REQ)){
 		pthread_mutex_unlock(&pri_msg->lock);
+		ARPC_LOG_ERROR("message is do request, need to wait respone.");
 		return ARPC_ERROR;
 	}
 	SET_FLAG(pri_msg->flag, XIO_MSG_CANCEL);
@@ -84,6 +85,11 @@ int arpc_delete_msg(struct arpc_msg **msg)
 	pthread_mutex_unlock(&pri_msg->lock);
 
 	pthread_mutex_lock(&pri_msg->lock);
+	if (IS_SET(pri_msg->flag, XIO_MSG_RSP)) {
+		ARPC_LOG_DEBUG("message get rsp, need to release.");
+		_release_rsp_msg(*msg); // 释放回复资源
+	}
+	CLR_FLAG(pri_msg->flag, XIO_MSG_RSP);
 	pthread_cond_destroy(&pri_msg->cond);
 	pthread_mutex_unlock(&pri_msg->lock);
 
@@ -94,7 +100,7 @@ int arpc_delete_msg(struct arpc_msg **msg)
 	return 0;
 }
 
-int arpc_msg_reset(struct arpc_msg *msg)
+int arpc_reset_msg(struct arpc_msg *msg)
 {
 	struct arpc_msg_data *pri_msg = NULL;
 	if (!msg) {

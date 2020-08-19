@@ -309,7 +309,7 @@ int arpc_delete_msg(struct arpc_msg **msg);
  * @param[in] msg ,消息体指针
  * @return  int; (<em>-1</em>: fail ; ( <em>0</em>: succeed
  */
-int arpc_msg_reset(struct arpc_msg *msg);
+int arpc_reset_msg(struct arpc_msg *msg);
 
 
 /*! 
