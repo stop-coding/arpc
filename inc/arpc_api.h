@@ -441,6 +441,7 @@ struct arpc_new_session_req{
 enum arpc_new_session_status{
 	ARPC_E_STATUS_OK = 0,										/*! @brief session可正常建立*/
 	ARPC_E_STATUS_INVALID_USER, 								/*! @brief 非法用户，拒绝建立session */
+	ARPC_E_STATUS_TOO_MANY_USERS, 								/*! @brief 连接的用户太多，拒绝连接服务 */
 	ARPC_E_STATUS_UNKOWN_ERR, 									/*! @brief 未知错误，拒绝建立session */
 };
 
