@@ -99,7 +99,7 @@ free_user_buf:
 
 do_respone:	
 	/* attach request to response */
-	return _do_respone(&rsp.rsp_iov, req, ops->release_rsp_cb, usr_ctx);
+	return _do_respone(rsp.rsp_iov, req, ops->release_rsp_cb, usr_ctx);
 }
 
 int _process_send_rsp_complete(struct xio_msg *rsp, struct request_ops *ops, void *usr_ctx)
@@ -112,7 +112,7 @@ int _process_send_rsp_complete(struct xio_msg *rsp, struct request_ops *ops, voi
 	rsp->user_context =NULL;
 
 	if(IS_SET(rsp->usr_flags, FLAG_RSP_USER_DATA) && rsp_ctx && rsp_ctx->release_rsp_cb){
-		rsp_ctx->release_rsp_cb(&rsp_ctx->rsp_iov, rsp_ctx->rsp_usr_ctx); //释放用户申请的资源
+		rsp_ctx->release_rsp_cb(rsp_ctx->rsp_iov, rsp_ctx->rsp_usr_ctx); //释放用户申请的资源
 	}
 
 	if (rsp_ctx) {

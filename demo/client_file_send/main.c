@@ -117,7 +117,7 @@ int main(int argc, char *argv[])
 		}
 		free(requst->send.vec);
 		requst->send.vec = NULL;
-		arpc_msg_reset(requst);
+		arpc_reset_msg(requst);
 	}
 	sleep(5);
 	arpc_delete_msg(&requst);

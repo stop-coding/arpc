@@ -164,7 +164,7 @@ static int _msg_async_deal(void *usr_ctx)
 	if (async->ops.proc_async_cb && async->ops.release_rsp_cb){
 		async->ops.proc_async_cb(&async->rev_iov, &rsp, async->usr_ctx);
 		if (!IS_SET(rsp.flags, METHOD_CALLER_ASYNC)) {
-			ret = _do_respone(&rsp.rsp_iov, async->msg, async->ops.release_rsp_cb, async->usr_ctx);
+			ret = _do_respone(rsp.rsp_iov, async->msg, async->ops.release_rsp_cb, async->usr_ctx);
 			LOG_ERROR_IF_VAL_TRUE(ret, "_do_respone fail.");
 		}
 	}else if (async->ops.proc_oneway_async_cb) {
@@ -384,7 +384,7 @@ int _do_respone(struct arpc_vmsg *rsp_iov, struct xio_msg  *req, rsp_cb_t releas
 			}
 			rsp_msg->out.pdata_iov.max_nents = rsp_iov->vec_num;
 			vmsg_sglist_set_nents(&rsp_msg->out, rsp_iov->vec_num);
-			rsp_com_ctx->rsp_iov = *rsp_iov;
+			rsp_com_ctx->rsp_iov = rsp_iov;
 		}else{
 			rsp_msg->out.pdata_iov.max_nents = 0;
 			vmsg_sglist_set_nents(&rsp_msg->out, 0);

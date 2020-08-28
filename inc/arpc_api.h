@@ -138,7 +138,7 @@ typedef void *arpc_rsp_handle_t;
  */
 struct arpc_rsp{
 	uint32_t			flags;								/*! @brief 消息处理标记位,通过 SET_METHOD方法设置*/
-	struct arpc_vmsg 	rsp_iov;							/*! @brief 由调用者填充的回复的数据 */
+	struct arpc_vmsg 	*rsp_iov;							/*! @brief 由调用者填充的回复的数据 */
 	arpc_rsp_handle_t   rsp_fd;								/*! @brief 消息回复句柄，用于arpc_do_respone接口*/
 };
 
