@@ -366,12 +366,13 @@ int _do_respone(struct arpc_vmsg *rsp_iov, struct xio_msg  *req, rsp_cb_t releas
 	memset(rsp_com_ctx, 0, sizeof(struct _rsp_complete_ctx));
 	rsp_com_ctx->release_rsp_cb = release_rsp_cb;
 	rsp_com_ctx->rsp_usr_ctx = rsp_ctx;
-
+	
 	if(rsp_iov && rsp_iov->head && rsp_iov->head_len){
 		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!release_rsp_cb, rsp_default, "release_rsp_cb is null ,can't send user rsp data.");
+		rsp_com_ctx->rsp_iov = rsp_iov;
 		rsp_msg->out.header.iov_base = rsp_iov->head;
 		rsp_msg->out.header.iov_len  = rsp_iov->head_len;
-		if (rsp_iov->vec && rsp_iov->total_data && rsp_iov->vec_num) {
+		if (rsp_iov->vec && rsp_iov->vec_num) {
 			ARPC_LOG_DEBUG("rsp  data.");
 			rsp_msg->out.total_data_len  = rsp_iov->total_data;
 			rsp_msg->out.sgl_type = XIO_SGL_TYPE_IOV_PTR;
@@ -384,7 +385,6 @@ int _do_respone(struct arpc_vmsg *rsp_iov, struct xio_msg  *req, rsp_cb_t releas
 			}
 			rsp_msg->out.pdata_iov.max_nents = rsp_iov->vec_num;
 			vmsg_sglist_set_nents(&rsp_msg->out, rsp_iov->vec_num);
-			rsp_com_ctx->rsp_iov = rsp_iov;
 		}else{
 			rsp_msg->out.pdata_iov.max_nents = 0;
 			vmsg_sglist_set_nents(&rsp_msg->out, 0);
