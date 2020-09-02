@@ -214,8 +214,8 @@ struct oneway_ops {
 	void* (*alloc_cb)(uint32_t size, void* usr_context);
 	int (*free_cb)(void* buf_ptr, void* usr_context);
 	int (*proc_head_cb)(struct arpc_header_msg *header, void* usr_context, uint32_t *flag);
-	int (*proc_data_cb)(const struct arpc_vmsg *req_iov, void* usr_context);
-	int (*proc_async_cb)(const struct arpc_vmsg *req_iov, void* usr_context);
+	int (*proc_data_cb)(const struct arpc_vmsg *req_iov, uint32_t *flag, void* usr_context);
+	int (*proc_async_cb)(const struct arpc_vmsg *req_iov, uint32_t *flag, void* usr_context);
 };
 
 /**
@@ -234,8 +234,8 @@ struct arpc_session_ops {
 
 #define PRIVATE_HANDLE	char handle[0]						/*! @brief 私用数据段声明 */
 
-#define MAX_HEADER_DATA_LEN 1024							/*! @brief 消息体头部最大长度 */
-#define DATA_DEFAULT_MAX_LEN  16*1024						/*! @brief 消息体数据段最大长度 */
+#define MAX_HEADER_DATA_LEN   1024							/*! @brief 消息体头部最大长度 */
+#define DATA_DEFAULT_MAX_LEN  64*1024						/*! @brief 消息体数据段最大长度 */
 #define IOV_DEFAULT_MAX_LEN   1024							/*! @brief 数据每个IOV最长长度 */
 
 /**
