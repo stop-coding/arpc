@@ -2611,7 +2611,9 @@ static int xio_tcp_on_recv_rsp_header(struct xio_tcp_transport *tcp_hndl,
 		if (IS_APPLICATION_MSG(task->tlv_type)){
 			/* we already got the header with the XIO management */
 			imsg->in.total_data_len = rsp_hdr.ulp_imm_len;
-			imsg->user_context		= task->sender_task->omsg->user_context;
+			if (task->sender_task->omsg) {
+				imsg->user_context		= task->sender_task->omsg->user_context;
+			}
 			if(xio_tcp_alloc_data_buf(tcp_hndl, task)){
 				isgtbl = vmsg_base_sglist(&imsg->in);
 				inents = vmsg_sglist_nents(&imsg->in);
@@ -2714,6 +2716,10 @@ static int xio_tcp_on_recv_rsp_data(struct xio_tcp_transport *tcp_hndl,
 	void			*sg;
 
 	omsg		= task->sender_task->omsg;
+	if (!omsg) {
+		ERROR_LOG("task->sender_task->omsg is null %d\n");
+		goto partial_msg;
+	}
 	imsg		= &task->imsg;
 	isgtbl		= xio_sg_table_get(&imsg->in);
 	isgtbl_ops	= (struct xio_sg_table_ops *)
@@ -3462,7 +3468,8 @@ int xio_tcp_rx_ctl_handler(struct xio_tcp_transport *tcp_hndl, int batch_nr)
 	while (task && (&task->tasks_list_entry != &tcp_hndl->rx_list) &&
 	       (count < batch_nr) && !exit) {
 		tcp_task = (struct xio_tcp_task *)task->dd_data;
-
+		if (tcp_task) {
+	
 		switch (tcp_task->rxd.stage) {
 		case XIO_TCP_RX_START:
 			/* ORK todo find a better place to rearm rx_list?*/
@@ -3509,6 +3516,8 @@ int xio_tcp_rx_ctl_handler(struct xio_tcp_transport *tcp_hndl, int batch_nr)
 			retval = xio_mbuf_read_first_tlv(&task->mbuf);
 			if (retval < 0) {
                                 exit = 1;
+								ERROR_LOG("unknown message type:%d\n",
+						  tcp_task->rxd.stage);
                                 break;
                         }
 			tcp_task->rxd.msg.msg_iov[0].iov_base =
@@ -3578,6 +3587,9 @@ int xio_tcp_rx_ctl_handler(struct xio_tcp_transport *tcp_hndl, int batch_nr)
 			ERROR_LOG("unknown stage type:%d\n",
 				  tcp_task->rxd.stage);
 			break;
+		}
+		}else{
+			ERROR_LOG("tcp_task is null\n");
 		}
 		task = list_first_entry(&task->tasks_list_entry,
 					struct xio_task,  tasks_list_entry);

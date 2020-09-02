@@ -146,6 +146,7 @@ int arpc_send_oneway_msg(const arpc_session_handle_t fd, struct arpc_msg *msg)
 		MSG_CLR_REQ(pri_msg->flag);
 	}
 	pthread_mutex_unlock(&pri_msg->lock);	//un lock
+	arpc_usleep(300); // 这里需要一个延时，避免高速发送数据处理异常
 	return ret;
 error:
 	pthread_mutex_unlock(&pri_msg->lock);	//un lock
@@ -282,7 +283,11 @@ static struct xio_msg *_arpc_create_xio_msg(struct arpc_msg *msg)
 	(void)memset(req, 0, sizeof(struct xio_msg));
 	req->out.header.iov_base = msg->send.head;
 	req->out.header.iov_len = msg->send.head_len;
-
+	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(req->out.header.iov_len > MAX_HEADER_DATA_LEN, 
+								data_null, 
+								"header len[%lu] is over max limit[%u].",
+								req->out.header.iov_len,
+								MAX_HEADER_DATA_LEN);
 	/* data */
 	req->out.sgl_type	   = XIO_SGL_TYPE_IOV_PTR;
 	LOG_DEBUG_GOTO_TAG_IF_VAL_TRUE(!msg->send.total_data, data_null, "send total_data is 0.");
@@ -300,17 +305,16 @@ static struct xio_msg *_arpc_create_xio_msg(struct arpc_msg *msg)
 
 	SET_FLAG(pri_msg->flag, XIO_SEND_MSG_ALLOC_BUF);// 标识分配内存
 	for (i =0; i < msg->send.vec_num; i++){
+		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(msg->send.vec[i].len > IOV_DEFAULT_MAX_LEN, 
+										data_null, 
+										"vec len[%lu] is over max limit[%u].",
+										msg->send.vec[i].len,
+										IOV_DEFAULT_MAX_LEN);
 		req->out.pdata_iov.sglist[i].iov_base = msg->send.vec[i].data;
 		req->out.pdata_iov.sglist[i].iov_len = msg->send.vec[i].len;
 	}
 	LOG_THEN_RETURN_VAL_IF_TRUE(( msg->send.vec_num && !msg->send.vec), NULL, "send vec null ,fail.");
 	goto end;
-
-data_null:
-	req->out.pdata_iov.max_nents =0;
-	req->out.pdata_iov.nents = 0;
-	req->out.pdata_iov.sglist = NULL;
-
 end:
 	/* receive 默认方式*/
 	req->in.sgl_type	   		= XIO_SGL_TYPE_IOV;
@@ -320,6 +324,11 @@ end:
 	req->user_context = msg;
 
 	return req;
+data_null:
+	req->out.pdata_iov.max_nents =0;
+	req->out.pdata_iov.nents = 0;
+	req->out.pdata_iov.sglist = NULL;
+	return NULL;
 }
 // 释放发送锁自动分配的资源
 static void _arpc_destroy_xio_msg(struct arpc_msg *msg)

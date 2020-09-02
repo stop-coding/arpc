@@ -48,8 +48,6 @@ extern "C" {
 #define RETRY_MAX_TIME	10	/* session断开自动重连次数*/
 #define SERVER_DOWN_WAIT_TIME		10
 
-#define SAFE_FREE_MEM(prt) if(prt) free(prt);prt= NULL;
-
 #define IS_SET(flag, tag) (flag&(1<<tag))
 #define SET_FLAG(flag, tag) flag=(flag|(1<<tag))
 #define CLR_FLAG(flag, tag) flag=(flag&~(1<<tag))
@@ -136,7 +134,7 @@ struct _async_proc_ops{
 	int (*free_cb)(void* buf_ptr, void* usr_context);
 	int (*proc_async_cb)(const struct arpc_vmsg *req_iov, struct arpc_rsp *rsp_iov, void* usr_context);
 	int (*release_rsp_cb)(struct arpc_vmsg *rsp_iov, void* usr_context);
-	int (*proc_oneway_async_cb)(const struct arpc_vmsg *, void* usr_context);
+	int (*proc_oneway_async_cb)(const struct arpc_vmsg *, uint32_t *flags, void* usr_context);
 };
 
 struct _proc_header_func{
@@ -151,9 +149,29 @@ struct _rsp_complete_ctx{
 	void *rsp_usr_ctx;
 };
 
+static inline void arpc_sleep(uint64_t s)
+{
+	struct timeval time;
+	time.tv_sec = s;
+	time.tv_usec = 0;
+	select(0, NULL, NULL, NULL, &time);
+	return;
+}
+
+static inline void arpc_usleep(uint64_t us)
+{
+	struct timeval time;
+	time.tv_sec = 0;
+	time.tv_usec = us;
+	select(0, NULL, NULL, NULL, &time);
+	return;
+}
+
 // base
 #define ARPC_MEM_ALLOC(size, usr_context) malloc(size)
 #define ARPC_MEM_FREE(ptr, usr_context)	free(ptr)
+
+#define SAFE_FREE_MEM(prt) do{if(prt) {ARPC_MEM_FREE(prt, NULL);prt= NULL;}}while(0);
 
 int get_uri(const struct arpc_con_info *param, char *uri, uint32_t uri_len);
 void* _arpc_get_threadpool();

@@ -48,40 +48,50 @@ int _process_oneway_data(struct xio_msg *req,
 	int				ret;
 	struct arpc_vmsg 	rev_iov;
 	struct _async_proc_ops async_ops;
+	uint32_t flags = 0;
 
 	LOG_THEN_RETURN_VAL_IF_TRUE((!req), ARPC_ERROR, "req null.");
-	if (IS_SET(req->usr_flags, FLAG_MSG_ERROR_DISCARD_DATA)) {
-		goto free_user_buf;
-	}
+	LOG_THEN_RETURN_VAL_IF_TRUE((!ops), ARPC_ERROR, "ops null.");
+	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(IS_SET(req->usr_flags, FLAG_MSG_ERROR_DISCARD_DATA), 
+									release_req, "dicard data.");
+
 	memset(&rev_iov, 0, sizeof(struct arpc_vmsg));
 	rev_iov.head = req->in.header.iov_base;
 	rev_iov.head_len = req->in.header.iov_len;
 	rev_iov.vec_num = nents;
-	rev_iov.vec = (struct arpc_iov *)sglist;
 	rev_iov.total_data = req->in.total_data_len;
 	
-	if (IS_SET(req->usr_flags, METHOD_ARPC_PROC_SYNC) && ops->proc_data_cb) {
-		ret = ops->proc_data_cb(&rev_iov, usr_ctx);
-		LOG_ERROR_IF_VAL_TRUE((ret != ARPC_SUCCESS), "proc_data_cb fail.");
-	}else if(IS_SET(req->usr_flags, METHOD_ALLOC_DATA_BUF) &&
-		ops->free_cb && ops->proc_async_cb){
+	if (IS_SET(req->usr_flags, METHOD_ALLOC_DATA_BUF)) {
+		rev_iov.vec = (struct arpc_iov *)vmsg_base_sglist(&req->in);
+	}else{
+		// todo
+		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(1, release_req, "it need to do more, fix me.");
+	}
+
+	if (IS_SET(req->usr_flags, METHOD_ARPC_PROC_SYNC)) {
+		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!ops->proc_data_cb, free_data, "proc_data_cb is null.");
+		ret = ops->proc_data_cb(&rev_iov, &flags, usr_ctx);
+		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, free_data, "proc_data_cb  return fail.");
+		req->usr_flags |= flags;
+		goto free_data;
+	}else {
+		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!IS_SET(req->usr_flags, METHOD_ALLOC_DATA_BUF), 
+										free_data, "system alloc memory do not allowe deal on async.");
+		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!ops->free_cb, free_data, "free_cb is null, can't do async.");
+		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!ops->proc_async_cb, free_data, "proc_async_cb is null, can't do async.");
 		async_ops.alloc_cb = ops->alloc_cb;
 		async_ops.free_cb = ops->free_cb;
 		async_ops.proc_oneway_async_cb = ops->proc_async_cb;
 		async_ops.proc_async_cb = NULL;
-		xio_release_msg(req);
-		ret = _post_iov_to_async_thread(&rev_iov, NULL, &async_ops, usr_ctx);
-		if(ret != ARPC_SUCCESS) {
-			ARPC_LOG_ERROR("_post_iov_to_async_thread fail.");
-			goto free_user_buf;
-		}
-		return 0;
-	}else{
-		ARPC_LOG_ERROR("none process to do, fail.");
-		goto free_user_buf;
+		ret = _post_iov_to_async_thread(&rev_iov, req, &async_ops, usr_ctx);
+		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, free_data, "_post_iov_to_async_thread fail.");
 	}
-free_user_buf:
-	_clean_header_source(req, ops->free_cb, usr_ctx);
-	xio_release_msg(req);
+	
 	return 0;
+
+free_data:
+	_clean_header_source(req, ops->free_cb, usr_ctx);
+release_req:
+	xio_release_msg(req);
+	return -1;
 }

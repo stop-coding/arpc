@@ -19,6 +19,7 @@
 #include <unistd.h>
 #include <sys/time.h>
 
+#include "base_log.h"
 #include "queue.h"
 #include "arpc_com.h"
 #include "threadpool.h"
@@ -151,12 +152,14 @@ static int _client_msg_header_dispatch(struct xio_session *session,
 	ARPC_LOG_DEBUG("header message type:%d", msg->type);
 	switch(msg->type) {
 		case XIO_MSG_TYPE_REQ:
+			LOG_THEN_RETURN_VAL_IF_TRUE((!client->ops), -1, "client->ops is null.");
 			ret = _process_request_header(msg, &client->ops->req_ops, IOV_DEFAULT_MAX_LEN, _fd->usr_context);
 			break;
 		case XIO_MSG_TYPE_RSP:
 			ret = _process_rsp_header(msg, _fd->usr_context);
 			break;
 		case XIO_MSG_TYPE_ONE_WAY:
+			LOG_THEN_RETURN_VAL_IF_TRUE((!client->ops), -1, "client->ops is null.");
 			ret = _process_oneway_header(msg, &client->ops->oneway_ops, IOV_DEFAULT_MAX_LEN, _fd->usr_context);
 			break;  
 		default:
@@ -176,12 +179,14 @@ static int _client_msg_data_dispatch(struct xio_session *session,
 	ARPC_LOG_DEBUG("msg_data_dispatch, msg type:%d", rsp->type);
 	switch(rsp->type) {
 		case XIO_MSG_TYPE_REQ:
+			LOG_THEN_RETURN_VAL_IF_TRUE((!client->ops), -1, "client->ops is null.");
 			ret = _process_request_data(rsp, &client->ops->req_ops, last_in_rxq, _fd->usr_context);
 			break;
 		case XIO_MSG_TYPE_RSP:
 			ret = _process_rsp_data(rsp, last_in_rxq);
 			break;
 		case XIO_MSG_TYPE_ONE_WAY:
+			LOG_THEN_RETURN_VAL_IF_TRUE((!client->ops), -1, "client->ops is null.");
 			ret = _process_oneway_data(rsp, &client->ops->oneway_ops, last_in_rxq, _fd->usr_context);
 			break;
 		default:

@@ -27,6 +27,7 @@
 #include "arpc_api.h"
 
 #define BUF_MAX_SIZE 1024
+
 /*---------------------------------------------------------------------------*/
 /* main									     */
 /*---------------------------------------------------------------------------*/
@@ -43,9 +44,8 @@ int main(int argc, char *argv[])
 	char *file_path = NULL;
 	FILE *fp = NULL;
 
-	if (argc < 4) {
-		printf("Usage: %s <host> <port> <file path>\
-				<finite run:optional>\n", argv[0]);
+	if (argc < 5) {
+		printf("Usage: %s <host> <port> <file path> <req data>. \n", argv[0]);
 		return 0;
 	}
 	printf("input:<%s> <%s> <%s> <%s>\n", argv[1], argv[2], argv[3], argv[4]);
@@ -80,31 +80,31 @@ int main(int argc, char *argv[])
 		requst->send.head_len = strlen(file_path);
 		requst->send.head = file_path;
 		requst->send.total_data = send_len;
-		requst->send.vec_num = (requst->send.total_data / IOV_DEFAULT_MAX_LEN) + 1;
+		requst->send.vec_num = (requst->send.total_data / BUF_MAX_SIZE) + 1;
 		requst->proc_rsp_cb = NULL;
 
 		// 读取文件
 		requst->send.vec = malloc(requst->send.vec_num * sizeof(struct arpc_iov));
 		for (i = 0; i  < requst->send.vec_num -1; i++) {
-			fseek(fp, i*IOV_DEFAULT_MAX_LEN + offset, SEEK_SET);
-			requst->send.vec[i].data = malloc(IOV_DEFAULT_MAX_LEN);
-			requst->send.vec[i].len = fread(requst->send.vec[i].data, 1, IOV_DEFAULT_MAX_LEN, fp);
-			if (requst->send.vec[i].len < IOV_DEFAULT_MAX_LEN){
+			fseek(fp, i*BUF_MAX_SIZE + offset, SEEK_SET);
+			requst->send.vec[i].data = malloc(BUF_MAX_SIZE);
+			requst->send.vec[i].len = fread(requst->send.vec[i].data, 1, BUF_MAX_SIZE, fp);
+			if (requst->send.vec[i].len < BUF_MAX_SIZE){
 				if(feof(fp)){
 					break;
 				}
 			}
 		}
-		fseek(fp, i*IOV_DEFAULT_MAX_LEN + offset, SEEK_SET);
+		fseek(fp, i*BUF_MAX_SIZE + offset, SEEK_SET);
 		offset += send_len;
-		send_len = send_len % IOV_DEFAULT_MAX_LEN;
+		send_len = send_len % BUF_MAX_SIZE;
 		requst->send.vec[i].data = malloc(send_len);
 		requst->send.vec[i].len = fread(requst->send.vec[i].data, 1, send_len, fp);
 		if (requst->send.vec[i].len < send_len){
 			printf("fread len fail\n");
 		}
-		ret = arpc_do_request(session_fd, requst, -1);
-		//ret = arpc_send_oneway_msg(session_fd, requst);
+		//ret = arpc_do_request(session_fd, requst, -1);
+		ret = arpc_send_oneway_msg(session_fd, requst);
 		//usleep(500*1000);
 		if (ret != 0){
 			printf("arpc_do_request fail\n");
@@ -119,7 +119,6 @@ int main(int argc, char *argv[])
 		requst->send.vec = NULL;
 		arpc_reset_msg(requst);
 	}
-	sleep(5);
 	arpc_delete_msg(&requst);
 	arpc_client_destroy_session(&session_fd);
 	printf("file send complete:%s.\n", file_path);

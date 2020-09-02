@@ -151,6 +151,7 @@ static int _msg_async_deal(void *usr_ctx)
 	uint32_t i;
 	struct arpc_rsp rsp;
 	int ret;
+	uint64_t flags;
 
 	ARPC_LOG_DEBUG("Note: msg deal on thread[%lu]...", pthread_self());// to do
 	if (!async){
@@ -162,13 +163,14 @@ static int _msg_async_deal(void *usr_ctx)
 	memset(&rsp, 0, sizeof (struct arpc_rsp));
 	rsp.rsp_fd = (void*)async->msg;							
 	if (async->ops.proc_async_cb && async->ops.release_rsp_cb){
-		async->ops.proc_async_cb(&async->rev_iov, &rsp, async->usr_ctx);
+		ret = async->ops.proc_async_cb(&async->rev_iov, &rsp, async->usr_ctx);
 		if (!IS_SET(rsp.flags, METHOD_CALLER_ASYNC)) {
 			ret = _do_respone(rsp.rsp_iov, async->msg, async->ops.release_rsp_cb, async->usr_ctx);
 			LOG_ERROR_IF_VAL_TRUE(ret, "_do_respone fail.");
 		}
 	}else if (async->ops.proc_oneway_async_cb) {
-		async->ops.proc_oneway_async_cb(&async->rev_iov, async->usr_ctx);
+		ret = async->ops.proc_oneway_async_cb(&async->rev_iov, &rsp.flags, async->usr_ctx);
+		xio_release_msg(async->msg);
 	}else{
 		ARPC_LOG_ERROR("proc_async_cb invalid, exit.");// to do
 	}
@@ -275,7 +277,7 @@ int _create_header_source(struct xio_msg *msg, struct _proc_header_func *ops, ui
 	// alloc data buf form user define call back
 	if (!IS_SET(msg->usr_flags, METHOD_ALLOC_DATA_BUF)) {
 		ARPC_LOG_DEBUG("not need alloc data buf.");
-		return ARPC_SUCCESS;
+		return ARPC_ERROR;
 	}
 
 	if (!ops->alloc_cb || !ops->free_cb) {
@@ -338,10 +340,14 @@ int _clean_header_source(struct xio_msg *msg, mem_free_cb_t free_cb, void *usr_c
 		ARPC_LOG_ERROR("msg buf is null, nents:%u.", nents);
 		return ARPC_ERROR;
 	}
-	for (i = 0; i < nents; i++) {
-		if (sglist[i].iov_base)
-			free_cb(sglist[i].iov_base, usr_ctx);
+
+	if (!IS_SET(msg->usr_flags, METHOD_CALLER_HIJACK_RX_DATA)){
+		for (i = 0; i < nents; i++) {
+			if (sglist[i].iov_base)
+				free_cb(sglist[i].iov_base, usr_ctx);
+		}
 	}
+	
 	if (sglist)
 		ARPC_MEM_FREE(sglist, NULL);
 	

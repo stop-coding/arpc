@@ -41,7 +41,7 @@ static int mem_free(void *buf_ptr, void *usr_context)
 
 static int process_rx_header(struct arpc_header_msg *header, void* usr_context, uint32_t *flag)
 {
-	SET_METHOD(*flag, METHOD_ALLOC_DATA_BUF);
+	SET_METHOD(*flag, METHOD_ALLOC_DATA_BUF);// vec数据释放
 	return 0;
 }
 
@@ -126,7 +126,7 @@ static int process_async(const struct arpc_vmsg *req_iov, struct arpc_rsp *rsp, 
 	printf("----dddd--end.\n");
 	return 0;
 }
-static int process_rx_oneway_data(const struct arpc_vmsg *req_iov, void *usr_context)
+static int process_rx_oneway_data(const struct arpc_vmsg *req_iov, uint32_t *flags, void *usr_context)
 {
 	char file_path[512] = {0};
 	FILE *fp = NULL;
@@ -153,7 +153,7 @@ static int process_rx_oneway_data(const struct arpc_vmsg *req_iov, void *usr_con
 	return 0;
 }
 
-static int process_oneway_async(const struct arpc_vmsg *req_iov, void* usr_context)
+static int process_oneway_async(const struct arpc_vmsg *req_iov, uint32_t *flags, void* usr_context)
 {
 	FILE *fp = NULL;
 	char file_path[512] = {0};
@@ -163,7 +163,7 @@ static int process_oneway_async(const struct arpc_vmsg *req_iov, void* usr_conte
 		return 0;
 	}
 	sprintf(file_path, "./rev_%s", (char *)usr_context);
-
+	printf("------file:%s, receive len:%lu.\n", file_path, req_iov->total_data);
 	fp = fopen(file_path, "ab");
 	if (!fp){
 		printf("fopen path:%s fail.\n", file_path);
