@@ -28,7 +28,7 @@
 
 typedef int (*func_xio_send_msg)(struct xio_connection *conn, struct xio_msg *msg);
 
-static struct xio_msg *_arpc_create_xio_msg(struct arpc_msg *msg);
+static struct xio_msg *_arpc_create_xio_msg(uint32_t *flag, struct arpc_vmsg *send, struct xio_msg *req);
 static void _arpc_destroy_xio_msg(struct arpc_msg *msg);
 
 static struct arpc_msg *_xio_create_arpc_msg(struct xio_msg *rsp_msg);
@@ -54,11 +54,12 @@ int arpc_do_request(const arpc_session_handle_t fd, struct arpc_msg *msg, int32_
 	LOG_THEN_RETURN_VAL_IF_TRUE((!fd || !msg ), ARPC_ERROR, "arpc_session_handle_t fd null, exit.");
 
 	pri_msg = (struct arpc_msg_data*)msg->handle;
+	pri_msg->send = &msg->send;
 	pthread_mutex_lock(&pri_msg->lock);	// to lock
 	// get msg
-	req = _arpc_create_xio_msg(msg);
+	req = _arpc_create_xio_msg(&pri_msg->flag, pri_msg->send, &pri_msg->x_msg);
 	LOG_THEN_GOTO_TAG_IF_VAL_TRUE((req == NULL), error, "_arpc_convert_xio_msg fail.");
-
+	req->user_context = msg;
 	/*session 发送数据*/
 	pthread_mutex_lock(&_fd->lock);
 	if(_fd->active_conn && _fd->status == SESSION_STA_RUN_ACTION) {
@@ -112,21 +113,27 @@ error:
  * @param[in] msg ,a data that will send
  * @return receive .0,表示发送成功，小于0则失败
  */
-int arpc_send_oneway_msg(const arpc_session_handle_t fd, struct arpc_msg *msg)
+int arpc_send_oneway_msg(const arpc_session_handle_t fd, struct arpc_vmsg *send, clean_send_cb_t clean_send, void *send_ctx)
 {
 	struct arpc_handle_ex *_fd = (struct arpc_handle_ex *)fd;
 	struct arpc_msg_data *pri_msg = NULL;
 	int ret = ARPC_ERROR;
 	struct xio_msg 	*req = NULL;
+	struct arpc_msg *msg =NULL;
 
-	LOG_THEN_RETURN_VAL_IF_TRUE((!_fd || !msg ), ARPC_ERROR, "arpc_session_handle_t fd null, exit.");
+	LOG_THEN_RETURN_VAL_IF_TRUE((!_fd || !send ), ARPC_ERROR, "arpc_session_handle_t fd null, exit.");
+	msg = arpc_new_msg(NULL);
+	LOG_THEN_RETURN_VAL_IF_TRUE(!msg, ARPC_ERROR, "arpc_new_msg fail, exit.");
+
+	msg->clean_send_cb = clean_send;
 	pri_msg = (struct arpc_msg_data*)msg->handle;
-
+	pri_msg->send = send;
+	pri_msg->usr_ctx = send_ctx;
 	pthread_mutex_lock(&pri_msg->lock);	// to lock
 	// get msg
-	req = _arpc_create_xio_msg(msg);
+	req = _arpc_create_xio_msg(&pri_msg->flag, pri_msg->send, &pri_msg->x_msg);
 	LOG_THEN_GOTO_TAG_IF_VAL_TRUE((req == NULL), error, "_arpc_convert_xio_msg fail.");
-
+	req->user_context = msg;
 	/*session加锁保护*/
 	pthread_mutex_lock(&_fd->lock);
 	if(_fd->active_conn && _fd->status == SESSION_STA_RUN_ACTION) {
@@ -144,12 +151,21 @@ int arpc_send_oneway_msg(const arpc_session_handle_t fd, struct arpc_msg *msg)
 		ret = _arpc_wait_request_rsp(pri_msg, MAX_SEND_ONEWAY_END_TIME);
 		LOG_ERROR_IF_VAL_TRUE(ret, "receive rsp msg fail for time out or system fail.");
 		MSG_CLR_REQ(pri_msg->flag);
+		pthread_mutex_unlock(&pri_msg->lock);	//un lock
+		if (msg) {
+			arpc_delete_msg(&msg);
+		}
+	}else{
+		SET_FLAG(pri_msg->flag, XIO_RELEASE_ARPC_MSG); //发送完成，释放消息
+		pthread_mutex_unlock(&pri_msg->lock);	//un lock
 	}
-	pthread_mutex_unlock(&pri_msg->lock);	//un lock
 	arpc_usleep(300); // 这里需要一个延时，避免高速发送数据处理异常
 	return ret;
 error:
 	pthread_mutex_unlock(&pri_msg->lock);	//un lock
+	if (msg) {
+		arpc_delete_msg(&msg);
+	}
 	return ARPC_ERROR;	
 }
 
@@ -249,7 +265,7 @@ int _process_send_complete(struct arpc_msg *msg)
 	pthread_mutex_lock(&pri_msg->lock);
 	req = &pri_msg->x_msg;
 	if (msg->clean_send_cb){
-		msg->clean_send_cb(&msg->send, pri_msg->usr_ctx);
+		msg->clean_send_cb(pri_msg->send, pri_msg->usr_ctx);
 	}
 	if (req->type == XIO_MSG_TYPE_ONE_WAY) {
 		CLR_FLAG(pri_msg->flag, XIO_MSG_REQ);
@@ -262,27 +278,30 @@ int _process_send_complete(struct arpc_msg *msg)
 	}
 	pthread_mutex_unlock(&pri_msg->lock);
 
+	if (IS_SET(pri_msg->flag, XIO_RELEASE_ARPC_MSG)){
+		pthread_mutex_lock(&pri_msg->lock);
+		pthread_mutex_unlock(&pri_msg->lock);
+		arpc_delete_msg(&msg);
+	}
+
 	return ARPC_SUCCESS;
 }
 
 // private funciton
-static struct xio_msg *_arpc_create_xio_msg(struct arpc_msg *msg)
+static struct xio_msg *_arpc_create_xio_msg(uint32_t *flag, struct arpc_vmsg *send, struct xio_msg *req)
 {
-	struct xio_msg 	*req = NULL;
 	uint32_t i;
-	struct arpc_msg_data *pri_msg = (struct arpc_msg_data*)msg->handle;
 
-	req = &(pri_msg->x_msg);
 	/* header */
-	LOG_THEN_RETURN_VAL_IF_TRUE((!msg->send.head || !msg->send.head_len 
-								|| msg->send.head_len > MAX_HEADER_DATA_LEN), 
+	LOG_THEN_RETURN_VAL_IF_TRUE((!send->head || !send->head_len 
+								|| send->head_len > MAX_HEADER_DATA_LEN), 
 								NULL, "msg head is invalid, header:%p, len:%u.", 
-								msg->send.head, 
-								msg->send.head_len);
+								send->head, 
+								send->head_len);
 	
 	(void)memset(req, 0, sizeof(struct xio_msg));
-	req->out.header.iov_base = msg->send.head;
-	req->out.header.iov_len = msg->send.head_len;
+	req->out.header.iov_base = send->head;
+	req->out.header.iov_len = send->head_len;
 	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(req->out.header.iov_len > MAX_HEADER_DATA_LEN, 
 								data_null, 
 								"header len[%lu] is over max limit[%u].",
@@ -290,38 +309,35 @@ static struct xio_msg *_arpc_create_xio_msg(struct arpc_msg *msg)
 								MAX_HEADER_DATA_LEN);
 	/* data */
 	req->out.sgl_type	   = XIO_SGL_TYPE_IOV_PTR;
-	LOG_DEBUG_GOTO_TAG_IF_VAL_TRUE(!msg->send.total_data, data_null, "send total_data is 0.");
-	LOG_THEN_GOTO_TAG_IF_VAL_TRUE((msg->send.total_data > DATA_DEFAULT_MAX_LEN), data_null, 
+	LOG_DEBUG_GOTO_TAG_IF_VAL_TRUE(!send->total_data, data_null, "send total_data is 0.");
+	LOG_THEN_GOTO_TAG_IF_VAL_TRUE((send->total_data > DATA_DEFAULT_MAX_LEN), data_null, 
 									"send total_data[%lu] is over max size[%lu].",
-									msg->send.total_data,
+									send->total_data,
 									(uint64_t)DATA_DEFAULT_MAX_LEN);
-	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!msg->send.vec_num, data_null, "send vec_num is 0.");
-	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!msg->send.vec, data_null, "send vec null.");
+	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!send->vec_num, data_null, "send vec_num is 0.");
+	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!send->vec, data_null, "send vec null.");
 
-	req->out.pdata_iov.max_nents = msg->send.vec_num;
-	req->out.pdata_iov.nents = msg->send.vec_num;
-	req->out.pdata_iov.sglist = (struct xio_iovec_ex *)ARPC_MEM_ALLOC( msg->send.vec_num * sizeof(struct xio_iovec_ex), NULL);
+	req->out.pdata_iov.max_nents = send->vec_num;
+	req->out.pdata_iov.nents = send->vec_num;
+	req->out.pdata_iov.sglist = (struct xio_iovec_ex *)ARPC_MEM_ALLOC( send->vec_num * sizeof(struct xio_iovec_ex), NULL);
 	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!req->out.pdata_iov.sglist, data_null, "ARPC_MEM_ALLOC fail.");
 
-	SET_FLAG(pri_msg->flag, XIO_SEND_MSG_ALLOC_BUF);// 标识分配内存
-	for (i =0; i < msg->send.vec_num; i++){
-		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(msg->send.vec[i].len > IOV_DEFAULT_MAX_LEN, 
+	SET_FLAG(*flag, XIO_SEND_MSG_ALLOC_BUF);// 标识分配内存
+	for (i =0; i < send->vec_num; i++){
+		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(send->vec[i].len > IOV_DEFAULT_MAX_LEN, 
 										data_null, 
 										"vec len[%lu] is over max limit[%u].",
-										msg->send.vec[i].len,
+										send->vec[i].len,
 										IOV_DEFAULT_MAX_LEN);
-		req->out.pdata_iov.sglist[i].iov_base = msg->send.vec[i].data;
-		req->out.pdata_iov.sglist[i].iov_len = msg->send.vec[i].len;
+		req->out.pdata_iov.sglist[i].iov_base = send->vec[i].data;
+		req->out.pdata_iov.sglist[i].iov_len = send->vec[i].len;
 	}
-	LOG_THEN_RETURN_VAL_IF_TRUE(( msg->send.vec_num && !msg->send.vec), NULL, "send vec null ,fail.");
+	LOG_THEN_RETURN_VAL_IF_TRUE(( send->vec_num && !send->vec), NULL, "send vec null ,fail.");
 	goto end;
 end:
 	/* receive 默认方式*/
 	req->in.sgl_type	   		= XIO_SGL_TYPE_IOV;
 	req->in.data_iov.max_nents  = XIO_IOVLEN;
-
-	/* 消息上下文保存*/
-	req->user_context = msg;
 
 	return req;
 data_null:

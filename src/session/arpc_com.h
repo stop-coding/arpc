@@ -59,6 +59,7 @@ extern "C" {
 #define XIO_SEND_MSG_ALLOC_BUF 	5
 #define XIO_RSP_IOV_ALLOC_BUF  	6
 #define XIO_SEND_END_TO_NOTIFY  7
+#define XIO_RELEASE_ARPC_MSG  	8
 
 #define MSG_SET_REQ(flag) flag=(flag|(1<<XIO_MSG_REQ))
 #define MSG_SET_RSP(flag) flag=(flag|(1<<XIO_MSG_RSP))
@@ -121,6 +122,7 @@ struct arpc_msg_data {
 	void* (*alloc_cb)(uint32_t size, void* usr_context);
 	int (*free_cb)(void* buf_ptr, void* usr_context);
 	void* 						usr_ctx;				/* 用户上下文*/
+	struct arpc_vmsg 			*send;					/* 用户发送数据*/
 	uint32_t					iov_max_len;
 	struct xio_connection		*active_conn;			/* connection 资源*/
 	struct xio_msg				x_msg;

@@ -311,7 +311,6 @@ int arpc_delete_msg(struct arpc_msg **msg);
  */
 int arpc_reset_msg(struct arpc_msg *msg);
 
-
 /*! 
  * @brief 发送请求
  * 
@@ -324,6 +323,7 @@ int arpc_reset_msg(struct arpc_msg *msg);
  */
 int arpc_do_request(const arpc_session_handle_t fd, struct arpc_msg *msg, int32_t timeout_ms);
 
+typedef int (*clean_send_cb_t)(struct arpc_vmsg *send, void* usr_ctx);
 /*! 
  * @brief 发送单向消息
  * 
@@ -333,7 +333,10 @@ int arpc_do_request(const arpc_session_handle_t fd, struct arpc_msg *msg, int32_
  * @param[in] msg ,a data that will send
  * @return int .0,表示发送成功，小于0则失败
  */
-int arpc_send_oneway_msg(const arpc_session_handle_t fd, struct arpc_msg *msg);
+int arpc_send_oneway_msg(const arpc_session_handle_t fd, 
+						struct arpc_vmsg *send, 
+						clean_send_cb_t clean_send, 
+						void* send_ctx);
 
 /*! @brief 调用者回复消息资源释放回调函数，用于回复消息发送完毕后执行资源释放 */
 typedef int (*rsp_cb_t)(struct arpc_vmsg *rsp_iov, void* rsp_cb_ctx);
