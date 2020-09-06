@@ -183,6 +183,7 @@ int _arpc_get_ipv4_addr(struct sockaddr_storage *src_addr, char *ip, uint32_t le
 void _debug_printf_msg(struct xio_msg *rsp);
 int _post_iov_to_async_thread(struct arpc_vmsg *iov, struct xio_msg *oneway_msg, struct _async_proc_ops *ops, void *usr_ctx);
 int _arpc_wait_request_rsp(struct arpc_msg_data* pri_msg, int32_t timeout_ms);
+int _cond_wait_timeout(pthread_cond_t *cond, pthread_mutex_t *mutex, int32_t timeout_ms);
 
 int _create_header_source(struct xio_msg *msg, struct _proc_header_func *ops, uint64_t iov_max_len, void *usr_ctx);
 int _clean_header_source(struct xio_msg *msg, mem_free_cb_t free_cb, void *usr_ctx);

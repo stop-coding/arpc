@@ -137,6 +137,20 @@ _arpc_wait_request_rsp(struct arpc_msg_data* pri_msg, int32_t timeout_ms)
 	return ret;
 }
 
+int _cond_wait_timeout(pthread_cond_t *cond, pthread_mutex_t *mutex, int32_t timeout_ms)
+{
+	int ret;
+	struct timespec abstime;
+	struct timeval now;
+	uint64_t nsec;
+	gettimeofday(&now, NULL);	// 线程安全
+	nsec = now.tv_usec * 1000 + (timeout_ms % 1000) * 1000000;
+	abstime.tv_sec=now.tv_sec + nsec / 1000000000 + timeout_ms / 1000;
+	abstime.tv_nsec=nsec % 1000000000;
+	ret = pthread_cond_timedwait(cond, mutex, &abstime);
+	return ret;
+}
+
 
 struct _async_deal_msg_param{
 	struct xio_msg 			*msg;

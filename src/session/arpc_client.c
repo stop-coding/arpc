@@ -359,7 +359,7 @@ arpc_session_handle_t arpc_client_create_session(const struct arpc_client_sessio
 		goto error_5;
 	}
 	pthread_mutex_lock(&fd->lock);
-	pthread_cond_wait(&fd->cond, &fd->lock);
+	_cond_wait_timeout(&fd->cond, &fd->lock, 10 * 1000); // todo 暂定10s
 	pthread_mutex_unlock(&fd->lock);
 	ARPC_LOG_DEBUG("Create session success.");
 	return (arpc_session_handle_t)fd;
