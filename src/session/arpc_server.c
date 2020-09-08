@@ -163,7 +163,8 @@ static int _on_new_session(struct xio_session *session,
 		client_fd->usr_context = head->usr_context;
 	
 	client_fd->type = SESSION_SERVER_CHILD; 
-
+	client_fd->status = SESSION_STA_RUN_ACTION;
+	
 	attr.ses_ops = NULL;
 	attr.uri = NULL;
 	attr.user_context = (void*)client_fd;
