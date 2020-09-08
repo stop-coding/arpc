@@ -313,27 +313,28 @@ static struct xio_msg *_arpc_create_xio_msg(uint32_t *flag, struct arpc_vmsg *se
 									"send total_data[%lu] is over max size[%lu].",
 									send->total_data,
 									(uint64_t)DATA_DEFAULT_MAX_LEN);
-	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!send->vec_num, data_null, "send vec_num is 0.");
-	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!send->vec, data_null, "send vec null.");
 
 	req->out.pdata_iov.max_nents = send->vec_num;
 	req->out.pdata_iov.nents = send->vec_num;
-	req->out.pdata_iov.sglist = (struct xio_iovec_ex *)ARPC_MEM_ALLOC( send->vec_num * sizeof(struct xio_iovec_ex), NULL);
-	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!req->out.pdata_iov.sglist, data_null, "ARPC_MEM_ALLOC fail.");
+	if (req->out.pdata_iov.nents) {
+		req->out.pdata_iov.sglist = (struct xio_iovec_ex *)ARPC_MEM_ALLOC( send->vec_num * sizeof(struct xio_iovec_ex), NULL);
+		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!req->out.pdata_iov.sglist, data_null, "ARPC_MEM_ALLOC fail.");
 
-	SET_FLAG(*flag, XIO_SEND_MSG_ALLOC_BUF);// 标识分配内存
-	for (i =0; i < send->vec_num; i++){
-		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(send->vec[i].len > IOV_DEFAULT_MAX_LEN, 
-										data_null, 
-										"vec len[%lu] is over max limit[%u].",
-										send->vec[i].len,
-										IOV_DEFAULT_MAX_LEN);
-		req->out.pdata_iov.sglist[i].iov_base = send->vec[i].data;
-		req->out.pdata_iov.sglist[i].iov_len = send->vec[i].len;
+		SET_FLAG(*flag, XIO_SEND_MSG_ALLOC_BUF);// 标识分配内存
+		for (i =0; i < send->vec_num; i++){
+			LOG_THEN_GOTO_TAG_IF_VAL_TRUE(send->vec[i].len > IOV_DEFAULT_MAX_LEN, 
+											data_null, 
+											"vec len[%lu] is over max limit[%u].",
+											send->vec[i].len,
+											IOV_DEFAULT_MAX_LEN);
+			req->out.pdata_iov.sglist[i].iov_base = send->vec[i].data;
+			req->out.pdata_iov.sglist[i].iov_len = send->vec[i].len;
+		}
+	}else{
+		req->out.sgl_type = XIO_SGL_TYPE_IOV;
+		req->out.pdata_iov.nents = 0;
 	}
-	LOG_THEN_RETURN_VAL_IF_TRUE(( send->vec_num && !send->vec), NULL, "send vec null ,fail.");
-	goto end;
-end:
+	
 	/* receive 默认方式*/
 	req->in.sgl_type	   		= XIO_SGL_TYPE_IOV;
 	req->in.data_iov.max_nents  = XIO_IOVLEN;
@@ -449,26 +450,30 @@ static int _alloc_buf_to_rsp_msg(struct xio_msg *rsp)
 	if (!pri_msg->alloc_cb || !pri_msg->free_cb || IS_SET(pri_msg->flag ,XIO_MSG_CANCEL)){
 		goto error;
 	}
-	nents = (rsp->in.total_data_len / pri_msg->iov_max_len + 1);
-	sglist = (struct xio_iovec* )ARPC_MEM_ALLOC(nents * sizeof(struct xio_iovec), NULL);
-	if (!sglist) {
-		goto error;
-	}
+	nents = ((rsp->in.total_data_len / pri_msg->iov_max_len) + 1);
+	if (nents) {
+		sglist = (struct xio_iovec* )ARPC_MEM_ALLOC(nents * sizeof(struct xio_iovec), NULL);
+		if (!sglist) {
+			goto error;
+		}
 
-	// 分配资源
-	for (i = 0; i < nents -1; i++) {
-		sglist[i].iov_len = pri_msg->iov_max_len;
+		// 分配资源
+		for (i = 0; i < nents -1; i++) {
+			sglist[i].iov_len = pri_msg->iov_max_len;
+			sglist[i].iov_base = pri_msg->alloc_cb(sglist[i].iov_len, pri_msg->usr_ctx);
+			LOG_THEN_GOTO_TAG_IF_VAL_TRUE((!sglist[i].iov_base), error_1, "calloc fail.");
+		};
+		sglist[i].iov_len = (rsp->in.total_data_len % pri_msg->iov_max_len);
 		sglist[i].iov_base = pri_msg->alloc_cb(sglist[i].iov_len, pri_msg->usr_ctx);
-		LOG_THEN_GOTO_TAG_IF_VAL_TRUE((!sglist[i].iov_base), error_1, "calloc fail.");
-	};
-	sglist[i].iov_len = (rsp->in.total_data_len % pri_msg->iov_max_len);
-	sglist[i].iov_base = pri_msg->alloc_cb(sglist[i].iov_len, pri_msg->usr_ctx);
-	
-	rsp->in.sgl_type		   = XIO_SGL_TYPE_IOV_PTR;
-	rsp->in.data_tbl.sglist = sglist;
+		
+		rsp->in.sgl_type = XIO_SGL_TYPE_IOV_PTR;
+		rsp->in.data_tbl.sglist = sglist;
+		SET_FLAG(pri_msg->flag, XIO_MSG_ALLOC_BUF);
+	}else{
+		rsp->in.sgl_type = XIO_SGL_TYPE_IOV;
+	}
 	vmsg_sglist_set_nents(&rsp->in, nents);
 	rsp->in.data_tbl.max_nents = nents;
-	SET_FLAG(pri_msg->flag, XIO_MSG_ALLOC_BUF);
 
 	return 0;
 error_1:
