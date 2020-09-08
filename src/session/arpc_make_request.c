@@ -309,7 +309,7 @@ static struct xio_msg *_arpc_create_xio_msg(uint32_t *flag, struct arpc_vmsg *se
 								MAX_HEADER_DATA_LEN);
 	/* data */
 	req->out.sgl_type	   = XIO_SGL_TYPE_IOV_PTR;
-	LOG_DEBUG_GOTO_TAG_IF_VAL_TRUE(!send->total_data, data_null, "send total_data is 0.");
+	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!send->total_data, data_null, "send total_data is 0.");
 	LOG_THEN_GOTO_TAG_IF_VAL_TRUE((send->total_data > DATA_DEFAULT_MAX_LEN), data_null, 
 									"send total_data[%lu] is over max size[%lu].",
 									send->total_data,
