@@ -26,7 +26,7 @@
 
 #include "arpc_api.h"
 
-#define BUF_MAX_SIZE 1024
+#define BUF_MAX_SIZE 4096
 
 /*---------------------------------------------------------------------------*/
 /* main									     */
@@ -104,7 +104,7 @@ int main(int argc, char *argv[])
 			printf("fread len fail\n");
 		}
 		//ret = arpc_do_request(session_fd, requst, -1);
-		ret = arpc_send_oneway_msg(session_fd, requst);
+		ret = arpc_send_oneway_msg(session_fd, &requst->send, NULL, NULL);
 		//usleep(500*1000);
 		if (ret != 0){
 			printf("arpc_do_request fail\n");

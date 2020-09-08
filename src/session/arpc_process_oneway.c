@@ -60,12 +60,9 @@ int _process_oneway_data(struct xio_msg *req,
 	rev_iov.head_len = req->in.header.iov_len;
 	rev_iov.vec_num = nents;
 	rev_iov.total_data = req->in.total_data_len;
-	
-	if (IS_SET(req->usr_flags, METHOD_ALLOC_DATA_BUF)) {
+	rev_iov.vec = NULL;
+	if (IS_SET(req->usr_flags, METHOD_ALLOC_DATA_BUF) && nents) {
 		rev_iov.vec = (struct arpc_iov *)vmsg_base_sglist(&req->in);
-	}else{
-		// todo
-		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(1, release_req, "it need to do more, fix me.");
 	}
 
 	if (IS_SET(req->usr_flags, METHOD_ARPC_PROC_SYNC)) {
@@ -75,7 +72,7 @@ int _process_oneway_data(struct xio_msg *req,
 		req->usr_flags |= flags;
 		goto free_data;
 	}else {
-		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!IS_SET(req->usr_flags, METHOD_ALLOC_DATA_BUF), 
+		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!IS_SET(req->usr_flags, METHOD_ALLOC_DATA_BUF) && nents, 
 										free_data, "system alloc memory do not allowe deal on async.");
 		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!ops->free_cb, free_data, "free_cb is null, can't do async.");
 		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!ops->proc_async_cb, free_data, "proc_async_cb is null, can't do async.");

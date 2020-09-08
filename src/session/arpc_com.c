@@ -283,7 +283,7 @@ int _create_header_source(struct xio_msg *msg, struct _proc_header_func *ops, ui
 	msg->usr_flags = 0;
 	ret = ops->proc_head_cb(&header, usr_ctx, &flag);
 	if (ret != ARPC_SUCCESS || !msg->in.total_data_len){
-		SET_FLAG(msg->usr_flags, FLAG_MSG_ERROR_DISCARD_DATA); // data数据不做处理
+		//SET_FLAG(msg->usr_flags, FLAG_MSG_ERROR_DISCARD_DATA); // data数据不做处理
 		ARPC_LOG_DEBUG("discard data, total_data_len[%lu].", msg->in.total_data_len);
 		return ARPC_ERROR;
 	}
