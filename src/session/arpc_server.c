@@ -79,7 +79,7 @@ static int _server_session_event(struct xio_session *session,
 {
 	struct arpc_handle_ex *head = (struct arpc_handle_ex *)cb_user_context;
 	struct xio_connection_attr attr;
-	ARPC_LOG_DEBUG("################### event:%d ,%s. reason: %s.",event_data->event,
+	ARPC_LOG_DEBUG("##### session event:%d ,%s. reason: %s.",event_data->event,
 					xio_session_event_str(event_data->event),
 	       			xio_strerror(event_data->reason));
 	switch (event_data->event) {
@@ -89,11 +89,13 @@ static int _server_session_event(struct xio_session *session,
 				attr.user_context = cb_user_context;
 				xio_modify_connection(head->active_conn, &attr, XIO_CONNECTION_ATTR_USER_CTX);
 			}
+			head->status = SESSION_STA_RUN_ACTION;
 			break;
 		case XIO_SESSION_CONNECTION_TEARDOWN_EVENT:
 			if (event_data->conn){
 				 xio_connection_destroy(event_data->conn);
 				head->active_conn =NULL;
+				head->status = SESSION_STA_WAIT;
 			}
 			break;
 		case XIO_SESSION_TEARDOWN_EVENT:
