@@ -101,8 +101,10 @@ static int _server_session_event(struct xio_session *session,
 		case XIO_SESSION_TEARDOWN_EVENT:
 			if (session)
 				xio_session_destroy(session);
-			if (head && head->type == SESSION_SERVER_CHILD)
+			if (head && head->type == SESSION_SERVER_CHILD){
+				pthread_mutex_destroy(&head->lock);
 				ARPC_MEM_FREE(head, NULL);
+			}
 			break;
 		case XIO_SESSION_ERROR_EVENT:
 			break;
@@ -174,6 +176,8 @@ static int _on_new_session(struct xio_session *session,
 	ret = xio_modify_session(session, &attr, XIO_SESSION_ATTR_USER_CTX);
 	LOG_THEN_GOTO_TAG_IF_VAL_TRUE((ret != ARPC_SUCCESS), reject, "xio_modify_session fail.");
 
+	pthread_mutex_init(&client_fd->lock, NULL);  /* 初始化互斥锁 */
+
 	server->new_session_end((arpc_session_handle_t)client_fd, &param, head->usr_context);
 	xio_accept(session, NULL, 0, param.rsp_data, param.rsp_data_len); 
 	return 0;
@@ -192,6 +196,15 @@ static int _rsp_send_complete(struct xio_session *session,
 {
 	GET_NEW_SESSION_FD(new_fd, head, conn_user_context);
 	return _process_send_rsp_complete(rsp, &new_fd->ops.req_ops, head->usr_context);
+}
+
+static int _oneway_send_complete(struct xio_session *session,
+				    struct xio_msg *rsp,
+				    void *conn_user_context)
+{
+	struct arpc_msg  *_msg = (struct arpc_msg *)rsp->user_context;
+	LOG_THEN_RETURN_VAL_IF_TRUE((!_msg), -1, "arpc_msg_data is empty.");
+	return _process_send_complete(_msg);
 }
 
 static int _server_msg_header_dispatch(struct xio_session *session,
@@ -248,6 +261,7 @@ static struct xio_session_ops x_server_ops = {
 	.rev_msg_data_alloc_buf		=  &_server_msg_header_dispatch,
 	.on_msg						=  &_server_msg_data_dispatch,
 	.on_msg_send_complete		=  &_rsp_send_complete,
+	.on_ow_msg_send_complete	=  &_oneway_send_complete,
 	.on_msg_error				=  &_msg_error
 };
 
