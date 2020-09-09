@@ -301,7 +301,8 @@ int _create_header_source(struct xio_msg *msg, struct _proc_header_func *ops, ui
 	}
 
 	// 分配内存
-	nents = (msg->in.total_data_len / iov_max_len + 1);
+	nents = (msg->in.total_data_len%iov_max_len)? 1: 0;
+	nents += (msg->in.total_data_len / iov_max_len);
 	sglist = (struct xio_iovec* )ARPC_MEM_ALLOC(nents * sizeof(struct xio_iovec), NULL);
 	LOG_THEN_GOTO_TAG_IF_VAL_TRUE((!msg->in.data_tbl.sglist), error, "calloc fail.");
 
