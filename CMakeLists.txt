@@ -39,19 +39,29 @@ include_directories(${ARPC_INCLUDE} ${XIO_INCLUDE} ${SRC_COMMON} ${SRC_SESSION})
 set(LINK_LIB_PATH ${DPENDENCY_LIB_PATH})
 LINK_DIRECTORIES(${LIBRARY_OUTPUT_PATH} ${LINK_LIB_PATH})
  
- 
-#添加依赖项子目录
 
 #动态库
 add_library(arpc SHARED ${SOURCE_FILES})
-#链接静态库
 target_link_libraries(arpc 
  "-Wl,--whole-archive" #之后的库使用--whole-archive选项
  xio
 "-Wl,--no-whole-archive")  #之后的库不使用--whole-archive选项
 
+# 生成静态库目标
+add_library(arpc_static STATIC ${SOURCE_FILES})
+target_link_libraries(arpc_static 
+ "-Wl,--whole-archive" #之后的库使用--whole-archive选项
+ xio
+"-Wl,--no-whole-archive")  #之后的库不使用--whole-archive选项
+
+# 指定静态库的输出名称
+set_target_properties(arpc_static PROPERTIES OUTPUT_NAME "arpc")
+
+# 使动态库和静态库同时存在
+set_target_properties(arpc PROPERTIES CLEAN_DIRECT_OUTPUT 1)
+set_target_properties(arpc_static PROPERTIES CLEAN_DIRECT_OUTPUT 1)
+
 INSTALL(TARGETS arpc LIBRARY DESTINATION ${LINK_LIB_PATH})
-INSTALL(TARGETS arpc LIBRARY DESTINATION /usr/lib)
 
 #子项目
 add_subdirectory("${ARPC_OPENSRC_PATH}/xio/")
