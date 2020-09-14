@@ -78,19 +78,11 @@ include_directories(${ARPC_INCLUDE}
 set(LINK_LIB_PATH ${DPENDENCY_LIB_PATH})
 LINK_DIRECTORIES(${LIBRARY_OUTPUT_PATH} ${LINK_LIB_PATH})
  
-
 #动态库
 add_library(arpc SHARED ${SOURCE_FILES})
 
-# 生成静态库目标
-add_library(arpc_static STATIC ${SOURCE_FILES})
-
-# 指定静态库的输出名称
-set_target_properties(arpc_static PROPERTIES OUTPUT_NAME "arpc")
-
 # 使动态库和静态库同时存在
 set_target_properties(arpc PROPERTIES CLEAN_DIRECT_OUTPUT 1)
-set_target_properties(arpc_static PROPERTIES CLEAN_DIRECT_OUTPUT 1)
 
 INSTALL(TARGETS arpc LIBRARY DESTINATION ${LINK_LIB_PATH})
 
