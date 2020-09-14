@@ -20,6 +20,29 @@ set(ARPC_DEMO_PATH "${ARPC_ROOT_PATH}/demo")
 
 include("${COM_ROOT_PATH}/common.cmake")
 
+set(XIO_ROOT_PATH ${OPENSRC_PATH}/xio)
+set(XIO_INC ${XIO_ROOT_PATH}/include)
+set(XIO_COM ${XIO_ROOT_PATH}/src/common)
+set(XIO_XIO ${XIO_ROOT_PATH}/src/usr)
+set(XIO_LINUX ${XIO_ROOT_PATH}/src/usr)
+if(XIO_TYPE STREQUAL kernel)
+	set(TPYE_SRC  ${XIO_ROOT_PATH}/src/kernel)
+	set(XIO_OS ${XIO_ROOT_PATH}/src/libxio_os/linuxkernel)
+else()
+	set(XIO_TYPE "user")
+	set(TPYE_SRC  ${XIO_ROOT_PATH}/src/usr)
+	set(XIO_OS ${XIO_ROOT_PATH}/src/libxio_os/linuxapp)
+endif()
+
+#version文件
+set(VERSION_FILE_PATH ${XIO_ROOT_PATH})
+
+#版本
+set(VERSION_NUM "xio_1.7.0_release")
+
+set(VERSION_MSG "const char XIO_VERSION_STRING[] = \"${VERSION_NUM}\"\;")
+file(WRITE ${VERSION_FILE_PATH}/version.c ${VERSION_MSG})
+
 #设定源码
 set(XIO_INCLUDE ${OPENSRC_PATH}/xio/include)
 set(SRC_COMMON ${COM_SRC_PATH}/common)
@@ -30,9 +53,25 @@ set(SOURCE_FILES "")
 aux_source_directory(${SRC_COMMON} SOURCE_FILES)
 aux_source_directory(${SRC_SESSION} SOURCE_FILES)
 
- 
+aux_source_directory(${TPYE_SRC}/transport SOURCE_FILES)
+aux_source_directory(${TPYE_SRC}/transport/tcp SOURCE_FILES)
+aux_source_directory(${TPYE_SRC}/xio SOURCE_FILES)
+aux_source_directory(${XIO_COM} SOURCE_FILES)
+aux_source_directory(${VERSION_FILE_PATH}/ SOURCE_FILES)
+
 #设定头文件路径
-include_directories(${ARPC_INCLUDE} ${XIO_INCLUDE} ${SRC_COMMON} ${SRC_SESSION})
+include_directories(${ARPC_INCLUDE} 
+					${XIO_INCLUDE} 
+					${SRC_COMMON} 
+					${SRC_SESSION}
+					${XIO_INC} 
+					${XIO_COM} 
+					${XIO_COM}/sys 
+					${XIO_OS}
+					${XIO_XIO}
+					${TPYE_SRC}/xio
+					${TPYE_SRC}/transport
+					${TPYE_SRC}/transport/tcp)
  
  
 #设定链接库的路径（一般使用第三方非系统目录下的库）
@@ -42,17 +81,9 @@ LINK_DIRECTORIES(${LIBRARY_OUTPUT_PATH} ${LINK_LIB_PATH})
 
 #动态库
 add_library(arpc SHARED ${SOURCE_FILES})
-target_link_libraries(arpc 
- "-Wl,--whole-archive" #之后的库使用--whole-archive选项
- xio
-"-Wl,--no-whole-archive")  #之后的库不使用--whole-archive选项
 
 # 生成静态库目标
 add_library(arpc_static STATIC ${SOURCE_FILES})
-target_link_libraries(arpc_static 
- "-Wl,--whole-archive" #之后的库使用--whole-archive选项
- xio
-"-Wl,--no-whole-archive")  #之后的库不使用--whole-archive选项
 
 # 指定静态库的输出名称
 set_target_properties(arpc_static PROPERTIES OUTPUT_NAME "arpc")
@@ -64,6 +95,5 @@ set_target_properties(arpc_static PROPERTIES CLEAN_DIRECT_OUTPUT 1)
 INSTALL(TARGETS arpc LIBRARY DESTINATION ${LINK_LIB_PATH})
 
 #子项目
-add_subdirectory("${ARPC_OPENSRC_PATH}/xio/")
 add_subdirectory("${ARPC_DEMO_PATH}/client_file_send")
 add_subdirectory("${ARPC_DEMO_PATH}/server_file_rev")
