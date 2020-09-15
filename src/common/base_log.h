@@ -21,6 +21,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <syslog.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -30,11 +31,11 @@ extern "C" {
 #define BASE_SUCCESS		 0
 
 //#define BASE_DEBUG_ON
-#define BASE_LOG_ERROR(format, arg...) fprintf(stdout, 	"[ ARPC] [ ERROR] file:%s func: %s|%d---"format"\n", __FILE__, __FUNCTION__, __LINE__,##arg)
-#define BASE_LOG_NOTICE(format, arg...) fprintf(stdout, "[ ARPC] [NOTICE] func: %s|%d---"format"\n",__FUNCTION__, __LINE__, ##arg)
+#define BASE_LOG_ERROR(format, arg...) syslog(LOG_ERR, 	"[ ARPC] [ ERROR] file:%s func: %s|%d---"format"\n", __FILE__, __FUNCTION__, __LINE__,##arg)
+#define BASE_LOG_NOTICE(format, arg...) syslog(LOG_NOTICE, "[ ARPC] [NOTICE] func: %s|%d---"format"\n",__FUNCTION__, __LINE__, ##arg)
 
 #ifdef BASE_DEBUG_ON
-#define BASE_LOG_DEBUG(format, arg...) fprintf(stdout, "[ ARPC] [ DEBUG] func: %s|%d---"format"\n",__FUNCTION__, __LINE__, ##arg)
+#define BASE_LOG_DEBUG(format, arg...) syslog(LOG_DEBUG, "[ ARPC] [ DEBUG] func: %s|%d---"format"\n",__FUNCTION__, __LINE__, ##arg)
 #else
 #define BASE_LOG_DEBUG(format, arg...)
 #endif
