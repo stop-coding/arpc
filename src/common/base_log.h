@@ -35,7 +35,7 @@ extern "C" {
 #define BASE_LOG_NOTICE(format, arg...) syslog(LOG_NOTICE, "[ ARPC] [NOTICE] func: %s|%d---"format"\n",__FUNCTION__, __LINE__, ##arg)
 
 #ifdef BASE_DEBUG_ON
-#define BASE_LOG_DEBUG(format, arg...) syslog(LOG_DEBUG, "[ ARPC] [ DEBUG] func: %s|%d---"format"\n",__FUNCTION__, __LINE__, ##arg)
+#define BASE_LOG_DEBUG(format, arg...) syslog(LOG_WARNING, "[ ARPC] [ DEBUG] func: %s|%d---"format"\n",__FUNCTION__, __LINE__, ##arg)
 #else
 #define BASE_LOG_DEBUG(format, arg...)
 #endif

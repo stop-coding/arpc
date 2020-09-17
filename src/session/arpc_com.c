@@ -19,7 +19,6 @@
 #include <stdio.h>
 #include <string.h>
 #include <arpa/inet.h>
-#include <sys/time.h>
 
 #include "arpc_com.h"
 #include "threadpool.h"
@@ -30,7 +29,7 @@ struct aprc_paramter{
 };
 
 static struct aprc_paramter g_param= {
-	.thread_max_num = 5,
+	.thread_max_num = 10,
 	.thread_pool	= NULL,
 };
 
@@ -270,6 +269,7 @@ int _create_header_source(struct xio_msg *msg, struct _proc_header_func *ops, ui
 	uint32_t flag = 0;
 	uint32_t i;
 	int ret;
+	uint64_t last_size;
 
 	LOG_THEN_RETURN_VAL_IF_TRUE((!msg->in.header.iov_base || !msg->in.header.iov_len), -1, "header null.");
 	LOG_THEN_RETURN_VAL_IF_TRUE((!msg->in.header.iov_len), -1, "header len is 0.");
@@ -301,17 +301,21 @@ int _create_header_source(struct xio_msg *msg, struct _proc_header_func *ops, ui
 	}
 
 	// 分配内存
-	nents = (msg->in.total_data_len%iov_max_len)? 1: 0;
+	last_size = msg->in.total_data_len%iov_max_len;
+	nents = (last_size)? 1: 0;
 	nents += (msg->in.total_data_len / iov_max_len);
 	sglist = (struct xio_iovec* )ARPC_MEM_ALLOC(nents * sizeof(struct xio_iovec), NULL);
+	last_size = (last_size)? last_size :iov_max_len;
 	LOG_THEN_GOTO_TAG_IF_VAL_TRUE((!msg->in.data_tbl.sglist), error, "calloc fail.");
 
-	for (i = 0; i < nents -1; i++) {
+	ARPC_LOG_NOTICE("get msg, nent:%u, iov_max_len:%lu, total_size:%lu", nents, iov_max_len, msg->in.total_data_len);
+	
+	for (i = 0; i < nents - 1; i++) {
 		sglist[i].iov_len = iov_max_len;
 		sglist[i].iov_base = ops->alloc_cb(sglist[i].iov_len, usr_ctx);
 		LOG_THEN_GOTO_TAG_IF_VAL_TRUE((!sglist[i].iov_base), error_1, "calloc fail.");
 	}
-	sglist[i].iov_len = (msg->in.total_data_len % iov_max_len);
+	sglist[i].iov_len = last_size;
 	sglist[i].iov_base = ops->alloc_cb(sglist[i].iov_len, usr_ctx);
 	
 	// 出参
@@ -423,5 +427,36 @@ rsp:
 	rsp_msg->request = req;
 	rsp_msg->user_context = (void*)rsp_com_ctx;
 	xio_send_response(rsp_msg);
+	return 0;
+}
+
+int init_handle_ex(struct arpc_handle_ex *handle) 
+{
+	int ret;
+	LOG_THEN_RETURN_VAL_IF_TRUE(!handle, -1, "hanlde is null");
+
+	ret = pthread_mutex_init(&handle->lock, NULL); /* 初始化互斥锁 */
+	LOG_THEN_RETURN_VAL_IF_TRUE(ret, -1, "pthread_mutex_init fail.");
+
+    ret = arpc_cond_init(&handle->cond);	 /* 初始化条件变量 */
+	LOG_THEN_RETURN_VAL_IF_TRUE(ret, -1, "pthread_cond_init fail.");
+
+	handle->active_conn =NULL;
+	handle->type = SESSION_NONE;
+	handle->status = SESSION_STA_INIT;
+	return 0;
+}
+
+int release_handle_ex(struct arpc_handle_ex *handle) 
+{
+	int ret;
+	LOG_THEN_RETURN_VAL_IF_TRUE(!handle, -1, "hanlde is null");
+
+	ret = pthread_mutex_destroy(&handle->lock); /* 初始化互斥锁 */
+	LOG_THEN_RETURN_VAL_IF_TRUE(ret, -1, "pthread_mutex_destroy fail.");
+
+    ret = arpc_cond_destroy(&handle->cond);	 /* 初始化条件变量 */
+	LOG_THEN_RETURN_VAL_IF_TRUE(ret, -1, "arpc_cond_destroy fail.");
+
 	return 0;
 }

@@ -235,8 +235,8 @@ struct arpc_session_ops {
 #define PRIVATE_HANDLE	char handle[0]						/*! @brief 私用数据段声明 */
 
 #define MAX_HEADER_DATA_LEN   1024							/*! @brief 消息体头部最大长度 */
-#define DATA_DEFAULT_MAX_LEN  (64*1024)						/*! @brief 消息体数据段最大长度 64*1024*/
-#define IOV_DEFAULT_MAX_LEN   (4*1024)							/*! @brief 数据每个IOV最长长度 4*1024*/
+#define DATA_DEFAULT_MAX_LEN  (1024*1024)					/*! @brief 消息体数据段最大长度 1024*1024*/
+#define IOV_DEFAULT_MAX_LEN   (4*1024)						/*! @brief 数据每个IOV最长长度 4*1024*/
 
 /**
  * @brief  session消息体实例化参数

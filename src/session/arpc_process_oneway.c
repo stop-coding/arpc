@@ -54,7 +54,6 @@ int _process_oneway_data(struct xio_msg *req,
 	LOG_THEN_RETURN_VAL_IF_TRUE((!ops), ARPC_ERROR, "ops null.");
 	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(IS_SET(req->usr_flags, FLAG_MSG_ERROR_DISCARD_DATA), 
 									release_req, "dicard data.");
-
 	memset(&rev_iov, 0, sizeof(struct arpc_vmsg));
 	rev_iov.head = req->in.header.iov_base;
 	rev_iov.head_len = req->in.header.iov_len;
@@ -64,7 +63,6 @@ int _process_oneway_data(struct xio_msg *req,
 	if (IS_SET(req->usr_flags, METHOD_ALLOC_DATA_BUF) && nents) {
 		rev_iov.vec = (struct arpc_iov *)vmsg_base_sglist(&req->in);
 	}
-
 	if (IS_SET(req->usr_flags, METHOD_ARPC_PROC_SYNC)) {
 		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!ops->proc_data_cb, free_data, "proc_data_cb is null.");
 		ret = ops->proc_data_cb(&rev_iov, &flags, usr_ctx);
@@ -83,7 +81,6 @@ int _process_oneway_data(struct xio_msg *req,
 		ret = _post_iov_to_async_thread(&rev_iov, req, &async_ops, usr_ctx);
 		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, free_data, "_post_iov_to_async_thread fail.");
 	}
-	
 	return 0;
 
 free_data:

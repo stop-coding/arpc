@@ -22,6 +22,7 @@
 #include <string.h>
 #include <inttypes.h>
 #include <assert.h>
+#include <sys/time.h>
 
 #include "base_log.h"
 
@@ -78,6 +79,77 @@ do{\
 	}\
 }while(0);
 
+// 信号量
+struct arpc_cond{
+  pthread_cond_t cond;	    			/* cond */
+  pthread_mutex_t     lock;	    			/* lock */
+  uint8_t is_inited;
+  uint8_t is_lock;
+};
+
+inline static int arpc_cond_init(struct arpc_cond *cond)
+{
+	LOG_THEN_RETURN_VAL_IF_TRUE(cond->is_inited, -1, "rwlock have inited.");
+	pthread_mutex_init(&cond->lock, NULL); /* 初始化互斥锁 */
+	pthread_cond_init(&cond->cond, NULL);	 /* 初始化条件变量 */
+	cond->is_inited = 1;
+	cond->is_lock = 0;
+	return 0;
+}
+
+inline static int arpc_cond_lock(struct arpc_cond *cond)
+{
+	LOG_THEN_RETURN_VAL_IF_TRUE(!cond->is_inited, -1, "cond have not inited.");
+	pthread_mutex_lock(&cond->lock);
+	return 0;
+}
+
+inline static int arpc_cond_unlock(struct arpc_cond *cond)
+{
+	LOG_THEN_RETURN_VAL_IF_TRUE(!cond->is_inited, -1, "cond have not inited.");
+	pthread_mutex_unlock(&cond->lock);
+	return 0;
+}
+
+inline static int arpc_cond_wait_timeout(struct arpc_cond *cond, uint64_t timeout_ms)
+{
+	int ret;
+	struct timespec abstime;
+	struct timeval now;
+	uint64_t nsec;
+
+	LOG_THEN_RETURN_VAL_IF_TRUE(!cond->is_inited, -1, "cond have not inited.");
+
+	gettimeofday(&now, NULL);	// 线程安全
+	nsec = now.tv_usec * 1000 + (timeout_ms % 1000) * 1000000;
+	abstime.tv_sec=now.tv_sec + nsec / 1000000000 + timeout_ms / 1000;
+	abstime.tv_nsec=nsec % 1000000000;
+	return pthread_cond_timedwait(&cond->cond, &cond->lock, &abstime);
+}
+
+inline static int arpc_cond_wait(struct arpc_cond *cond)
+{
+	LOG_THEN_RETURN_VAL_IF_TRUE(!cond->is_inited, -1, "cond have not inited.");
+	return pthread_cond_wait(&cond->cond, &cond->lock);
+}
+
+inline static int arpc_cond_notify(struct arpc_cond *cond)
+{
+	LOG_THEN_RETURN_VAL_IF_TRUE(!cond->is_inited, -1, "cond have not inited.");
+	pthread_cond_signal(&cond->cond);
+	return 0;
+}
+
+inline static int arpc_cond_destroy(struct arpc_cond *cond)
+{
+	LOG_THEN_RETURN_VAL_IF_TRUE(!cond->is_inited, -1, "cond have not inited.");
+	pthread_cond_destroy(&cond->cond);
+	pthread_mutex_destroy(&cond->lock);
+	cond->is_inited = 0;
+	cond->is_lock = 0;
+	return 0;
+}
+
 #define FLAG_ALLOC_BUF_TO_REV 		5
 #define FLAG_RSP_USER_DATA 			6
 #define FLAG_MSG_ERROR_DISCARD_DATA 7
@@ -92,8 +164,9 @@ enum session_status{
 
 enum session_type{
 	SESSION_CLIENT = 0, //
-	SESSION_SERVER, 	//初始化
-	SESSION_SERVER_CHILD, 	//初始化
+	SESSION_SERVER, 	//
+	SESSION_SERVER_CHILD, 	//
+	SESSION_NONE, 	//
 };
 
 struct arpc_handle_ex {
@@ -106,8 +179,9 @@ struct arpc_handle_ex {
 	int32_t						retry_time;				/* 重连次数 */
 	int32_t						reconn_interval_s;		/* 重连间隔 */
 	enum session_status			status;
-	pthread_cond_t 				cond;					/* 数据接收的条件变量*/
+	struct arpc_cond 			cond;					/* 数据接收的条件变量*/
 	pthread_mutex_t             lock;	    			/* lock */
+	uint32_t					isActive;
 	char 						handle_ex[0];			/* exterd handle */
 };
 
@@ -129,6 +203,14 @@ struct arpc_msg_data {
 	pthread_cond_t 				cond;					/* 数据接收的条件变量*/
 	pthread_mutex_t             lock;	    			/* lock */
 	uint32_t 		 			flag;
+};
+
+struct arpc_send_one_way_msg {
+	clean_send_cb_t 			clean_send;
+	void 						*send_ctx;
+	struct arpc_vmsg 			*send;					/* 用户发送数据*/
+	struct xio_msg				x_msg;
+	void 						*usr_ctx;
 };
 
 struct _async_proc_ops{
@@ -178,7 +260,8 @@ static inline void arpc_usleep(uint64_t us)
 int get_uri(const struct arpc_con_info *param, char *uri, uint32_t uri_len);
 void* _arpc_get_threadpool();
 int _arpc_get_ipv4_addr(struct sockaddr_storage *src_addr, char *ip, uint32_t len, uint32_t *port);
-
+int init_handle_ex(struct arpc_handle_ex *hanlde);
+int release_handle_ex(struct arpc_handle_ex *handle);
 // others
 void _debug_printf_msg(struct xio_msg *rsp);
 int _post_iov_to_async_thread(struct arpc_vmsg *iov, struct xio_msg *oneway_msg, struct _async_proc_ops *ops, void *usr_ctx);
@@ -207,7 +290,8 @@ int _process_oneway_data(struct xio_msg *req, struct oneway_ops *ops, int last_i
 int _arpc_rev_request_head(struct xio_msg *in_rsp);
 int _arpc_rev_request_rsp(struct xio_msg *in_rsp);
 int _release_rsp_msg(struct arpc_msg *msg);
-int _process_send_complete(struct arpc_msg *msg);
+int _request_send_complete(struct arpc_msg *msg);
+int _oneway_send_complete(struct arpc_send_one_way_msg *oneway_msg);
 
 #ifdef __cplusplus
 }
