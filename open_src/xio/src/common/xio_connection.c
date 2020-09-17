@@ -178,7 +178,10 @@ char *xio_connection_state_str(enum xio_connection_state state)
 /*---------------------------------------------------------------------------*/
 static int xio_is_connection_online(struct xio_connection *connection)
 {
-	    return connection->session->state == XIO_SESSION_STATE_ONLINE &&
+	    if (!connection->session) {
+			return 0;
+		}
+		return connection->session->state == XIO_SESSION_STATE_ONLINE &&
 		   connection->state == XIO_CONNECTION_STATE_ONLINE;
 }
 
@@ -438,6 +441,7 @@ int xio_connection_send(struct xio_connection *connection,
 		xio_session_write_header(task, &hdr);
 	}
 	/* send it */
+	//ERROR_LOG("send taks：%p task->omsg:%p\n", task, task->omsg);
 	retval = xio_nexus_send(connection->nexus, task);
 	if (retval != 0) {
 		ERROR_LOG("xio_nexus_send failed with %d\n", retval);

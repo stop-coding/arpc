@@ -2717,7 +2717,7 @@ static int xio_tcp_on_recv_rsp_data(struct xio_tcp_transport *tcp_hndl,
 
 	omsg		= task->sender_task->omsg;
 	if (!omsg) {
-		ERROR_LOG("task->sender_task->omsg is null %d\n");
+		ERROR_LOG("task->sender_task->omsg is null %p, sender_task \n", omsg, task->sender_task);
 		goto partial_msg;
 	}
 	imsg		= &task->imsg;

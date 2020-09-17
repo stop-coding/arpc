@@ -52,18 +52,9 @@ LINK_DIRECTORIES(${LIBRARY_OUTPUT_PATH} ${LINK_LIB_PATH})
 
  
 #添加依赖项子目录
-#add_dependencies(xio)
-set(BUILD_STATIC true)
 
-if(BUILD_STATIC)
-	message("build static for xio")
-	add_library(xio STATIC ${SOURCE_FILES})        
-	INSTALL(TARGETS xio ARCHIVE DESTINATION ${LINK_LIB_PATH})
-else()
-	#动态库
-	add_library(xio SHARED ${SOURCE_FILES})
-	INSTALL(TARGETS xio LIBRARY DESTINATION ${LINK_LIB_PATH})
-	INSTALL(TARGETS xio LIBRARY DESTINATION /usr/lib)
-endif()
+#动态库
+add_library(xio SHARED ${SOURCE_FILES})
+INSTALL(TARGETS xio LIBRARY DESTINATION ${LINK_LIB_PATH})
  
 

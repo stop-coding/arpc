@@ -744,6 +744,7 @@ static int xio_on_rsp_recv(struct xio_connection *connection,
 		} else {
 			ERROR_LOG("ERROR: expected sn:%d, arrived sn:%d\n",
 				  connection->rsp_exp_sn, hdr.sn);
+			goto exit;
 		}
 	}
 	/*
@@ -761,7 +762,10 @@ static int xio_on_rsp_recv(struct xio_connection *connection,
 	msg->sn = hdr.serial_num;
 
 	omsg		= sender_task->omsg;
-
+	if (!omsg) {
+		ERROR_LOG("ERROR: omsg is null, task:%p, sender_task:%p\n", task, sender_task);
+		goto exit;
+	}
 #ifdef XIO_CFLAG_STAT_COUNTERS
 	xio_stat_add(stats, XIO_STAT_DELAY,
 		     get_cycles() - omsg->timestamp);
