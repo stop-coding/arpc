@@ -1331,7 +1331,7 @@ int xio_on_new_message(struct xio_session *s,
 
 	task->session		= session;
 	task->connection	= connection;
-
+	//ERROR_LOG("xio_on_new_message, task->tlv_type:%d\n", task->tlv_type);
 	switch (task->tlv_type) {
 	case XIO_MSG_REQ:
 	case XIO_ONE_WAY_REQ:

@@ -74,6 +74,7 @@ int main(int argc, char *argv[])
 
 	// 新建消息
 	requst = arpc_new_msg(NULL);
+
 	while(offset < file_len){
 		send_len = ((file_len - offset) > DATA_DEFAULT_MAX_LEN)? DATA_DEFAULT_MAX_LEN: (file_len - offset);
 		printf("_____send_len:%lu, left_size:%lu____________\n", send_len, (file_len - offset));
@@ -103,8 +104,8 @@ int main(int argc, char *argv[])
 		if (requst->send.vec[i].len < send_len){
 			printf("fread len fail\n");
 		}
-		//ret = arpc_do_request(session_fd, requst, -1);
-		ret = arpc_send_oneway_msg(session_fd, &requst->send, NULL, NULL);
+		ret = arpc_do_request(session_fd, requst, -1);
+		//ret = arpc_send_oneway_msg(session_fd, &requst->send, NULL, NULL);
 		//usleep(500*1000);
 		if (ret != 0){
 			printf("arpc_do_request fail\n");
@@ -119,6 +120,7 @@ int main(int argc, char *argv[])
 		requst->send.vec = NULL;
 		arpc_reset_msg(requst);
 	}
+	sleep(5);
 	arpc_delete_msg(&requst);
 	arpc_client_destroy_session(&session_fd);
 	printf("file send complete:%s.\n", file_path);

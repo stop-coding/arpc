@@ -2166,6 +2166,9 @@ int xio_query_connection(struct xio_connection *connection,
 	if (attr_mask & XIO_CONNECTION_ATTR_USER_CTX)
 		attr->user_context = connection->cb_user_context;
 
+	if (attr_mask & XIO_CONNECTION_ATTR_CONN_IDX)
+		attr->conn_idx = connection->conn_idx;
+
 	if (attr_mask & XIO_CONNECTION_ATTR_CTX)
 		attr->ctx = connection->ctx;
 

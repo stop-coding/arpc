@@ -61,6 +61,7 @@ struct _work {
 	int (*loop)(void *usr_ctx);		/* 循环回调函数*/
 	void (*stop)(void *usr_ctx);		/* 停止循环回调函数*/
 	void *usr_ctx;						/* 任务上下文*/
+	pthread_t  thread_id;
 	WORK_PRIVATE_DATA;					/* 队列标识，内部使用，无需设置*/
 };
 
@@ -123,13 +124,14 @@ static void *task_worker(void* arg) {
 		to_run = QUEUE_DATA(q, struct _work, queue);
 
 		pthread_mutex_lock(&to_run->mutex);
+		to_run->thread_id = t_msg->thread_id;
 		CLR_FLAG(to_run->flag, FLAG_WORK_DONE);
 		SET_FLAG(to_run->flag, FLAG_WORK_RUN);
 		pthread_mutex_unlock(&to_run->mutex);
 
 		to_run->loop(to_run->usr_ctx);
-
 		pthread_mutex_lock(&to_run->mutex);
+		to_run->thread_id = 0;
 		if (IS_SET(to_run->flag, FLAG_WORK_WAIT)) {
 			CLR_FLAG(to_run->flag, FLAG_WORK_RUN);
 			SET_FLAG(to_run->flag, FLAG_WORK_DONE);
@@ -147,7 +149,7 @@ static void *task_worker(void* arg) {
 	}
 	TASK_CLR_ACTIVE(t_msg->flag);
 	pthread_mutex_unlock(&pool_ctx->mutex);
-	TP_LOG_DEBUG("work thread[%lu] exit success.", t_msg->thread_id);
+	TP_LOG_NOTICE("work thread[%lu] exit success.", t_msg->thread_id);
 	return NULL;
 }
 
@@ -271,7 +273,7 @@ work_handle_t tp_post_one_work(tp_handle fd, struct tp_thread_work *w, uint8_t a
   work->loop = w->loop;
   work->stop = w->stop;
   work->usr_ctx = w->usr_ctx;
-
+  work->thread_id = 0;
   ret = pthread_mutex_init(&work->mutex, NULL); /* 初始化互斥锁 */
   LOG_THEN_GOTO_TAG_IF_VAL_TRUE((ret != 0), error, "pthread_mutex_init fail.");
   ret = pthread_cond_init(&work->cond, NULL);	 /* 初始化条件变量 */
@@ -288,9 +290,6 @@ work_handle_t tp_post_one_work(tp_handle fd, struct tp_thread_work *w, uint8_t a
   if (pool->idle_num > 0)
     pthread_cond_signal(&pool->cond);
   pthread_mutex_unlock(&pool->mutex);
-  if (auto_free){
-    work = (struct _work*)HIDE_ADDR;
-  }
   return work;
 error:
   if (work)
@@ -344,29 +343,37 @@ end:
 
 int tp_cancel_one_work(work_handle_t *w)
 {
-  struct _work *work = (struct _work *)(*w);
-  LOG_THEN_RETURN_VAL_IF_TRUE((!w || !work || (work==(void*)HIDE_ADDR)), -1, "work_handle_t  fail.");
-  pthread_mutex_lock(&work->mutex);
-  if (!work->stop){
-    pthread_mutex_unlock(&work->mutex);
-    return -1;
-  }
+	struct _work *work = (struct _work *)(*w);
+	LOG_THEN_RETURN_VAL_IF_TRUE((!work || (work==(void*)HIDE_ADDR)), -1, "work_handle_t  fail.");
+	pthread_mutex_lock(&work->mutex);
+	if (!work->stop){
+		pthread_mutex_unlock(&work->mutex);
+		return -1;
+	}
 
-  if (IS_SET(work->flag, FLAG_WORK_DONE)){
-    goto end;
-  }
-
-  work->stop(work->usr_ctx);
-  SET_FLAG(work->flag, FLAG_WORK_WAIT);
-  pthread_cond_wait(&work->cond, &work->mutex);
-  pthread_mutex_unlock(&work->mutex);
+	if (IS_SET(work->flag, FLAG_WORK_DONE)){
+		goto end;
+	}
+	SET_FLAG(work->flag, FLAG_WORK_WAIT);
+	work->stop(work->usr_ctx);
+	pthread_cond_wait(&work->cond, &work->mutex);
 end:
-  if (IS_SET(work->flag, FLAG_WORK_INIT)) {
-    pthread_cond_destroy(&work->cond);
-    pthread_mutex_destroy(&work->mutex);
-  }
-  if (*w)
-    free(*w);
-  *w = NULL;
-  return 0;
+	pthread_mutex_unlock(&work->mutex);
+	if (IS_SET(work->flag, FLAG_WORK_INIT)) {
+		pthread_cond_destroy(&work->cond);
+		pthread_mutex_destroy(&work->mutex);
+	}
+	if (*w)
+		free(*w);
+	*w = NULL;
+	return 0;
+}
+
+uint64_t tp_get_work_thread_id(work_handle_t w)
+{
+	struct _work *work = (struct _work *)w;
+	if(work){
+		return (uint64_t)work->thread_id;
+	}
+	return 0;
 }

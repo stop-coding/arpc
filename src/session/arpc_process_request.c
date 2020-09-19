@@ -102,11 +102,11 @@ do_respone:
 	return _do_respone(rsp.rsp_iov, req, ops->release_rsp_cb, usr_ctx);
 }
 
-int _process_send_rsp_complete(struct xio_msg *rsp, struct request_ops *ops, void *usr_ctx)
+int _process_send_rsp_complete(struct xio_msg *rsp, void *usr_ctx)
 {
 	struct _rsp_complete_ctx *rsp_ctx;
 	
-	LOG_THEN_RETURN_VAL_IF_TRUE((!rsp || !ops), ARPC_ERROR, "rsp or ops null.");
+	LOG_THEN_RETURN_VAL_IF_TRUE((!rsp), ARPC_ERROR, "rsp or ops null.");
 	ARPC_LOG_DEBUG("rsp_send_complete, rsp:%p.", rsp);
 	rsp_ctx = (struct _rsp_complete_ctx *)rsp->user_context;
 	rsp->user_context =NULL;

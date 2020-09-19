@@ -54,13 +54,13 @@ extern "C" {
  * @def XIO_IOVLEN
  * @brief array size of data IO vector in message
  */
-#define XIO_IOVLEN			10
+#define XIO_IOVLEN			1024
 
 /**
  * @def XIO_MAX_IOV
  * @brief maximum size of data IO vector in message
  */
-#define XIO_MAX_IOV			256
+#define XIO_MAX_IOV			1024
 
 /*---------------------------------------------------------------------------*/
 /* opaque data structures                                                    */
@@ -211,7 +211,7 @@ enum xio_msg_flags {
 	 * connection is closed (which ever happens first). In order to
 	 * expedite signaling the user can enable this flag for the last msg
 	 */
-	XIO_MSG_FLAG_IMM_SEND_COMP	  = (1 << 3),
+ 	XIO_MSG_FLAG_IMM_SEND_COMP	  = (1 << 3),
 
 	/** last in batch. Typically, door bell to hardware indicating that
 	 * there are msgs to be sent is rang for every msg. In case the user
@@ -782,6 +782,7 @@ enum xio_connection_attr_mask {
 	XIO_CONNECTION_ATTR_PEER_ADDR		= 1 << 3,
 	XIO_CONNECTION_ATTR_LOCAL_ADDR		= 1 << 4,
 	XIO_CONNECTION_ATTR_DISCONNECT_TIMEOUT	= 1 << 5,
+	XIO_CONNECTION_ATTR_CONN_IDX	= 1 << 6,
 };
 
 /**
@@ -795,7 +796,9 @@ struct xio_connection_attr {
 	struct xio_context	*ctx;		/**< context data type	     */
 	uint8_t			tos;		/**< type of service RFC 2474 */
 	uint8_t			pad;            /**< padding                 */
-        uint16_t                disconnect_timeout_secs;
+    uint16_t                disconnect_timeout_secs;
+	uint16_t			pad1;            /**< padding                 */
+	uint16_t				conn_idx;
 	enum xio_proto		proto;	        /**< protocol type           */
 	struct sockaddr_storage	peer_addr;	/**< address of peer	     */
 	struct sockaddr_storage	local_addr;	/**< address of local	     */

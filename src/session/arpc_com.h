@@ -25,6 +25,8 @@
 #include <sys/time.h>
 
 #include "base_log.h"
+#include "queue.h"
+#include "threadpool.h"
 
 #include "libxio.h"
 #include "arpc_api.h"
@@ -78,6 +80,72 @@ do{\
 		iov[i].data = NULL;\
 	}\
 }while(0);
+
+// 互斥锁
+struct arpc_mutex{
+  pthread_mutex_t     lock;	    			/* lock */
+  uint8_t is_inited;
+};
+
+inline static int arpc_mutex_init(struct arpc_mutex *m)
+{
+	LOG_THEN_RETURN_VAL_IF_TRUE(pthread_mutex_init(&m->lock, NULL), ARPC_ERROR, "mutex initialize fail.");
+	m->is_inited = 1;
+	return ARPC_SUCCESS;
+}
+
+inline static int arpc_mutex_lock(struct arpc_mutex *m)
+{
+	LOG_THEN_RETURN_VAL_IF_TRUE(!m->is_inited, ARPC_ERROR, "lock have not inited.");
+	return pthread_mutex_lock(&m->lock);
+}
+
+inline static int arpc_mutex_unlock(struct arpc_mutex *m)
+{
+	LOG_THEN_RETURN_VAL_IF_TRUE(!m->is_inited, ARPC_ERROR, "lock have not inited.");
+	return pthread_mutex_unlock(&m->lock);
+}
+
+inline static int arpc_mutex_destroy(struct arpc_mutex *m)
+{
+	return m->is_inited ? pthread_mutex_destroy(&m->lock): 0;
+}
+
+// 读写锁
+struct arpc_rwlock{
+  pthread_rwlock_t lock;	    			/* lock */
+  uint8_t is_inited;
+};
+
+inline static int arpc_rwlock_init(struct arpc_rwlock *rw)
+{
+	LOG_THEN_RETURN_VAL_IF_TRUE(pthread_rwlock_init(&rw->lock, NULL), ARPC_ERROR, "rwlock initialize fail.");
+	rw->is_inited = 1;
+	return 0;
+}
+
+inline static int arpc_rwlock_rdlock(struct arpc_rwlock *rw)
+{
+	LOG_THEN_RETURN_VAL_IF_TRUE(!rw->is_inited, ARPC_ERROR, "rwlock have not inited.");
+	return pthread_rwlock_rdlock(&rw->lock);
+}
+
+inline static int arpc_rwlock_wrlock(struct arpc_rwlock *rw)
+{
+	LOG_THEN_RETURN_VAL_IF_TRUE(!rw->is_inited, ARPC_ERROR, "rwlock have not inited.");
+	return pthread_rwlock_wrlock(&rw->lock);
+}
+
+inline static int arpc_rwlock_unlock(struct arpc_rwlock *rw)
+{
+	LOG_THEN_RETURN_VAL_IF_TRUE(!rw->is_inited, ARPC_ERROR, "rwlock have not inited.");
+	return pthread_rwlock_unlock(&rw->lock);
+}
+
+inline static int arpc_rwlock_destroy(struct arpc_rwlock *rw)
+{
+	return rw->is_inited ? pthread_rwlock_destroy(&rw->lock): 0;
+}
 
 // 信号量
 struct arpc_cond{
@@ -140,6 +208,13 @@ inline static int arpc_cond_notify(struct arpc_cond *cond)
 	return 0;
 }
 
+inline static int arpc_cond_notify_all(struct arpc_cond *cond)
+{
+	LOG_THEN_RETURN_VAL_IF_TRUE(!cond->is_inited, -1, "cond have not inited.");
+	pthread_cond_broadcast(&cond->cond);
+	return 0;
+}
+
 inline static int arpc_cond_destroy(struct arpc_cond *cond)
 {
 	LOG_THEN_RETURN_VAL_IF_TRUE(!cond->is_inited, -1, "cond have not inited.");
@@ -169,22 +244,6 @@ enum session_type{
 	SESSION_NONE, 	//
 };
 
-struct arpc_handle_ex {
-	enum session_type type;
-	struct xio_connection		*active_conn;			/* connection 资源*/
-	struct xio_context			*ctx;					/* session thread 上下文 */
-	void 						*usr_context;			// 用户上下文
-	char 						uri[URI_MAX_LEN];
-	int32_t						affinity;				/* lock open connection */
-	int32_t						retry_time;				/* 重连次数 */
-	int32_t						reconn_interval_s;		/* 重连间隔 */
-	enum session_status			status;
-	struct arpc_cond 			cond;					/* 数据接收的条件变量*/
-	pthread_mutex_t             lock;	    			/* lock */
-	uint32_t					isActive;
-	char 						handle_ex[0];			/* exterd handle */
-};
-
 struct arpc_msg_buf {
 	struct xio_iovec_ex 		*xio_buf;
 	struct arpc_iov				*usr_buf;
@@ -210,6 +269,7 @@ struct arpc_send_one_way_msg {
 	void 						*send_ctx;
 	struct arpc_vmsg 			*send;					/* 用户发送数据*/
 	struct xio_msg				x_msg;
+	struct arpc_cond			cond;
 	void 						*usr_ctx;
 };
 
@@ -259,9 +319,9 @@ static inline void arpc_usleep(uint64_t us)
 
 int get_uri(const struct arpc_con_info *param, char *uri, uint32_t uri_len);
 void* _arpc_get_threadpool();
+uint32_t arpc_thread_max_num();
 int _arpc_get_ipv4_addr(struct sockaddr_storage *src_addr, char *ip, uint32_t len, uint32_t *port);
-int init_handle_ex(struct arpc_handle_ex *hanlde);
-int release_handle_ex(struct arpc_handle_ex *handle);
+
 // others
 void _debug_printf_msg(struct xio_msg *rsp);
 int _post_iov_to_async_thread(struct arpc_vmsg *iov, struct xio_msg *oneway_msg, struct _async_proc_ops *ops, void *usr_ctx);
@@ -276,7 +336,7 @@ int _do_respone(struct arpc_vmsg *rsp_iov, struct xio_msg  *req, rsp_cb_t releas
 // request
 int _process_request_header(struct xio_msg *msg, struct request_ops *ops, uint64_t iov_max_len, void *usr_ctx);
 int _process_request_data(struct xio_msg *req, struct request_ops *ops, int last_in_rxq, void *usr_ctx);
-int _process_send_rsp_complete(struct xio_msg *rsp, struct request_ops *ops, void *usr_ctx);
+int _process_send_rsp_complete(struct xio_msg *rsp, void *usr_ctx);
 
 // response
 int _process_rsp_header(struct xio_msg *rsp, void *usr_ctx);
@@ -291,7 +351,7 @@ int _arpc_rev_request_head(struct xio_msg *in_rsp);
 int _arpc_rev_request_rsp(struct xio_msg *in_rsp);
 int _release_rsp_msg(struct arpc_msg *msg);
 int _request_send_complete(struct arpc_msg *msg);
-int _oneway_send_complete(struct arpc_send_one_way_msg *oneway_msg);
+int _oneway_send_complete(struct arpc_send_one_way_msg *oneway_msg, void *con_usr_ctx);
 
 #ifdef __cplusplus
 }

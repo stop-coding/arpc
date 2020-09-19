@@ -24,12 +24,13 @@
 #include "threadpool.h"
 
 struct aprc_paramter{
-	int thread_max_num;
+	uint8_t is_init;
+	uint32_t thread_max_num;
 	tp_handle thread_pool;
 };
 
 static struct aprc_paramter g_param= {
-	.thread_max_num = 10,
+	.thread_max_num = 10,	//默认是个线程
 	.thread_pool	= NULL,
 };
 
@@ -69,10 +70,32 @@ int _arpc_get_ipv4_addr(struct sockaddr_storage *src_addr, char *ip, uint32_t le
 	return ARPC_SUCCESS;
 }
 
+int arpc_init_r(struct aprc_option *opt)
+{
+	struct tp_param p = {0};
+	ARPC_LOG_DEBUG( "arpc_init.");
+	if (g_param.is_init){
+		ARPC_LOG_NOTICE( "arpc global init have done.");
+		return 0;
+	}
+	g_param.is_init = 1;
+	xio_init();
+	if (opt) {
+		p.thread_max_num = opt->thread_max_num;
+	}
+	p.thread_max_num = g_param.thread_max_num;
+	g_param.thread_pool = tp_create_thread_pool(&p);
+	return 0;
+}
 int arpc_init()
 {
 	struct tp_param p = {0};
 	ARPC_LOG_DEBUG( "arpc_init.");
+	if (g_param.is_init){
+		ARPC_LOG_NOTICE( "arpc global init have done.");
+		return 0;
+	}
+	g_param.is_init = 1;
 	xio_init();
 	p.thread_max_num = g_param.thread_max_num;
 	g_param.thread_pool = tp_create_thread_pool(&p);
@@ -82,6 +105,11 @@ int arpc_init()
 void arpc_finish()
 {
 	ARPC_LOG_DEBUG( "arpc_finish.");
+	if (!g_param.is_init){
+		ARPC_LOG_NOTICE( "arpc global init have not done.");
+		return;
+	}
+	g_param.is_init = 0;
 	tp_destroy_thread_pool(&g_param.thread_pool);
 	xio_shutdown();
 }
@@ -89,6 +117,11 @@ void arpc_finish()
 tp_handle _arpc_get_threadpool()
 {
 	return g_param.thread_pool;
+}
+
+uint32_t arpc_thread_max_num()
+{
+	return g_param.thread_max_num;
 }
 
 void _debug_printf_msg(struct xio_msg *rsp)
@@ -313,11 +346,12 @@ int _create_header_source(struct xio_msg *msg, struct _proc_header_func *ops, ui
 	for (i = 0; i < nents - 1; i++) {
 		sglist[i].iov_len = iov_max_len;
 		sglist[i].iov_base = ops->alloc_cb(sglist[i].iov_len, usr_ctx);
+		//ARPC_LOG_NOTICE("i:%u ,data:%p, len:%lu.",i, sglist[i].iov_base, sglist[i].iov_len);
 		LOG_THEN_GOTO_TAG_IF_VAL_TRUE((!sglist[i].iov_base), error_1, "calloc fail.");
 	}
 	sglist[i].iov_len = last_size;
 	sglist[i].iov_base = ops->alloc_cb(sglist[i].iov_len, usr_ctx);
-	
+	ARPC_LOG_NOTICE("i:%u ,data:%p, len:%lu.",i, sglist[i].iov_base, sglist[i].iov_len);
 	// 出参
 	msg->in.data_tbl.sglist = (void*)sglist;
 	vmsg_sglist_set_nents(&msg->in, nents);
@@ -427,36 +461,5 @@ rsp:
 	rsp_msg->request = req;
 	rsp_msg->user_context = (void*)rsp_com_ctx;
 	xio_send_response(rsp_msg);
-	return 0;
-}
-
-int init_handle_ex(struct arpc_handle_ex *handle) 
-{
-	int ret;
-	LOG_THEN_RETURN_VAL_IF_TRUE(!handle, -1, "hanlde is null");
-
-	ret = pthread_mutex_init(&handle->lock, NULL); /* 初始化互斥锁 */
-	LOG_THEN_RETURN_VAL_IF_TRUE(ret, -1, "pthread_mutex_init fail.");
-
-    ret = arpc_cond_init(&handle->cond);	 /* 初始化条件变量 */
-	LOG_THEN_RETURN_VAL_IF_TRUE(ret, -1, "pthread_cond_init fail.");
-
-	handle->active_conn =NULL;
-	handle->type = SESSION_NONE;
-	handle->status = SESSION_STA_INIT;
-	return 0;
-}
-
-int release_handle_ex(struct arpc_handle_ex *handle) 
-{
-	int ret;
-	LOG_THEN_RETURN_VAL_IF_TRUE(!handle, -1, "hanlde is null");
-
-	ret = pthread_mutex_destroy(&handle->lock); /* 初始化互斥锁 */
-	LOG_THEN_RETURN_VAL_IF_TRUE(ret, -1, "pthread_mutex_destroy fail.");
-
-    ret = arpc_cond_destroy(&handle->cond);	 /* 初始化条件变量 */
-	LOG_THEN_RETURN_VAL_IF_TRUE(ret, -1, "arpc_cond_destroy fail.");
-
 	return 0;
 }

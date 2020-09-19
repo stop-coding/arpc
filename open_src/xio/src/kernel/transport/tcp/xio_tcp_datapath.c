@@ -2976,7 +2976,7 @@ int xio_tcp_rx_data_handler(struct xio_tcp_transport *tcp_hndl, int batch_nr,
 			xio_tcp_disconnect_helper(tcp_hndl);
 			return -1;
 		}
-
+		ERROR_LOG("rxd_work->msg iov-len:%u!!\n", MSGHDR_IOVLEN(&rxd_work->msg));
 		for (i = 0; i < MSGHDR_IOVLEN(&rxd_work->msg); i++) {
 			tcp_hndl->tmp_work.msg_iov
 			[tcp_hndl->tmp_work.msg_len].iov_base =

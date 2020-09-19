@@ -105,4 +105,17 @@ typedef void *QUEUE[2];
   }                                                                           \
   while (0)
 
+/*! @function
+  @abstract     Iterate over the values in the hash table
+  @param  h     Pointer to the hash table [khash_t(name)*]
+  @param  vvar  Variable to which value will be assigned
+  @param  code  Block of code to execute
+ */
+#define QUEUE_FOREACH_VAL(h, vvar, code)\
+for ((vvar) = QUEUE_NEXT(h); (vvar) != (h); (vvar) = QUEUE_NEXT(vvar)){\
+		code;\
+}
+
 #endif /* QUEUE_H_ */
+
+

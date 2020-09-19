@@ -55,7 +55,7 @@ struct tp_thread_work {
 work_handle_t tp_post_one_work(tp_handle fd, struct tp_thread_work *w, uint8_t auto_free);
 int tp_wait_work_done(work_handle_t *w, uint32_t timeout_ms);
 int tp_cancel_one_work(work_handle_t *w);
-
+uint64_t tp_get_work_thread_id(work_handle_t w);
 #ifdef __cplusplus
 }
 #endif

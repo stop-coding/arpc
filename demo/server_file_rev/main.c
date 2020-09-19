@@ -138,7 +138,7 @@ static int process_rx_oneway_data(const struct arpc_vmsg *req_iov, uint32_t *fla
 	}
 	sprintf(file_path, "./rev_%s", (char *)usr_context);
 
-	printf("------file:%s, receive len:%lu.\n", file_path, req_iov->total_data);
+	printf("sync------file:%s, receive len:%lu.\n", file_path, req_iov->total_data);
 
 	fp = fopen(file_path, "ab");
 	if (!fp){
@@ -163,7 +163,7 @@ static int process_oneway_async(const struct arpc_vmsg *req_iov, uint32_t *flags
 		return 0;
 	}
 	sprintf(file_path, "./rev_%s", (char *)usr_context);
-	printf("------file:%s, receive len:%lu.\n", file_path, req_iov->total_data);
+	printf("async------file:%s, receive len:%lu.\n", file_path, req_iov->total_data);
 	fp = fopen(file_path, "ab");
 	if (!fp){
 		printf("fopen path:%s fail.\n", file_path);
@@ -214,6 +214,7 @@ int main(int argc, char *argv[])
 	memcpy(param.con.ipv4.ip, argv[1], IPV4_MAX_LEN);
 	param.con.ipv4.port = atoi(argv[2]);
 
+	param.work_num = 5;
 	param.default_ops = ops;
 	param.new_session_start = &new_session_start;
 	param.new_session_end = &new_session_end;

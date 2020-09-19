@@ -20,6 +20,7 @@
 
 #include "queue.h"
 #include "arpc_com.h"
+#include "arpc_session.h"
 
 
 #ifdef 	_DEF_SESSION_CLIENT
@@ -45,42 +46,32 @@ static int _free_buf_on_rsp_msg(struct xio_msg *rsp);
  */
 int arpc_do_request(const arpc_session_handle_t fd, struct arpc_msg *msg, int32_t timeout_ms)
 {
-	struct arpc_handle_ex *_fd = (struct arpc_handle_ex *)fd;
+	struct arpc_session_handle *session_ctx = (struct arpc_session_handle *)fd;
 	struct xio_msg 	*req = NULL;
 	int ret = ARPC_ERROR;
 	struct arpc_msg_data *pri_msg = NULL;
 	struct arpc_msg *rev_msg;
+	struct arpc_connection *con;
 
-	LOG_THEN_RETURN_VAL_IF_TRUE((!fd || !msg ), ARPC_ERROR, "arpc_session_handle_t fd null, exit.");
+	LOG_THEN_RETURN_VAL_IF_TRUE((!session_ctx || !msg ), ARPC_ERROR, "arpc_session_handle_t fd null, exit.");
+
+	ret = get_connection(session_ctx, &con);
+	LOG_THEN_RETURN_VAL_IF_TRUE(!con, ARPC_ERROR, "not idle connection fail.");
 
 	pri_msg = (struct arpc_msg_data*)msg->handle;
 	pri_msg->send = &msg->send;
 	pthread_mutex_lock(&pri_msg->lock);	// to lock
+
 	// get msg
 	req = _arpc_create_xio_msg(&pri_msg->flag, pri_msg->send, &pri_msg->x_msg);
 	LOG_THEN_GOTO_TAG_IF_VAL_TRUE((req == NULL), error, "_arpc_convert_xio_msg fail.");
 	req->user_context = msg;
-	/*session 发送数据*/
-	pthread_mutex_lock(&_fd->lock);
-	if(_fd->active_conn && _fd->status == SESSION_STA_RUN_ACTION) {
-		ret = xio_send_request(_fd->active_conn, req);
-	}else{
-		ret = ARPC_ERROR;
-		ARPC_LOG_ERROR("session invalid, session status:%d.", _fd->status);
-	}
-	pthread_mutex_unlock(&_fd->lock);
+
+	ret = xio_send_request(con->xio_con, req);
+
 	MSG_SET_REQ(pri_msg->flag);
 	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, error, "xio_send_msg fail, ret:%d.", ret);
 	
-	if (msg->proc_rsp_cb && msg->clean_send_cb) {
-		goto end;// 可以实现完全非阻塞
-	}else if (msg->proc_rsp_cb) {
-		SET_FLAG(pri_msg->flag, XIO_SEND_END_TO_NOTIFY); //发送完成，发信号通知
-		ret = _arpc_wait_request_rsp(pri_msg, MAX_SEND_ONEWAY_END_TIME);
-		LOG_ERROR_IF_VAL_TRUE(ret, "receive rsp msg fail for time out or system fail.");
-		goto end;// 发送阻塞，接收非阻塞
-	}
-
 	// 全部等待回复
 	if (timeout_ms > 0)
 		ret = _arpc_wait_request_rsp(pri_msg, timeout_ms);
@@ -97,13 +88,16 @@ int arpc_do_request(const arpc_session_handle_t fd, struct arpc_msg *msg, int32_
 	}
 	_arpc_destroy_xio_msg(msg); // 释放发送资源
 
-end:	
 	pthread_mutex_unlock(&pri_msg->lock);	//un lock
+	ret = put_connection(session_ctx, con);
+	LOG_ERROR_IF_VAL_TRUE(ret, "put_connection fail.");
 	return ret;
 
 error:
 	_arpc_destroy_xio_msg(msg);
 	pthread_mutex_unlock(&pri_msg->lock);	//un lock
+	ret = put_connection(session_ctx, con);
+	LOG_ERROR_IF_VAL_TRUE(ret, "put_connection fail.");
 	return ARPC_ERROR;	
 }
 
@@ -147,13 +141,18 @@ int _request_send_complete(struct arpc_msg *msg)
  */
 int arpc_send_oneway_msg(const arpc_session_handle_t fd, struct arpc_vmsg *send, clean_send_cb_t clean_send, void *send_ctx)
 {
-	struct arpc_handle_ex *handle = (struct arpc_handle_ex *)fd;
+	struct arpc_session_handle *session_ctx = (struct arpc_session_handle *)fd;
 	int ret = ARPC_ERROR;
 	struct xio_msg 	*req = NULL;
 	struct arpc_send_one_way_msg *poneway_msg;
 	uint32_t flags = 0;
+	struct arpc_connection *con;
 
-	LOG_THEN_RETURN_VAL_IF_TRUE((!handle || !send ), ARPC_ERROR, "handle null, fail.");
+	LOG_THEN_RETURN_VAL_IF_TRUE((!session_ctx || !send ), ARPC_ERROR, "handle null, fail.");
+
+	ret = get_connection(session_ctx, &con);
+	LOG_THEN_RETURN_VAL_IF_TRUE(!con, ARPC_ERROR, "not idle connection fail.");
+
 	poneway_msg = ARPC_MEM_ALLOC(sizeof(struct arpc_send_one_way_msg), NULL);
 	LOG_THEN_RETURN_VAL_IF_TRUE(!poneway_msg, ARPC_ERROR, "arpc_new_msg fail, exit.");
 	memset(poneway_msg, 0, sizeof(struct arpc_send_one_way_msg));
@@ -161,39 +160,37 @@ int arpc_send_oneway_msg(const arpc_session_handle_t fd, struct arpc_vmsg *send,
 	poneway_msg->clean_send = clean_send;
 	poneway_msg->send_ctx = send_ctx;
 	poneway_msg->send = send;
-	poneway_msg->usr_ctx = handle;
+	poneway_msg->usr_ctx = con;
 	// get msg
 	req = _arpc_create_xio_msg(&flags, poneway_msg->send, &poneway_msg->x_msg);
-	LOG_THEN_GOTO_TAG_IF_VAL_TRUE((req == NULL), free_buf, "_arpc_convert_xio_msg fail.");
+	LOG_THEN_GOTO_TAG_IF_VAL_TRUE((req == NULL), unlock, "_arpc_convert_xio_msg fail.");
 	req->user_context = poneway_msg;
 
-	/*session加锁保护 这里不解锁，等发送完毕回调后再解锁*/
-	ret =arpc_cond_lock(&handle->cond);
-	if(handle->isActive){
-		ret = arpc_cond_wait_timeout(&handle->cond, MAX_SEND_ONEWAY_END_TIME);
-		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, unlock, "wait send end timeout, can't send.");
-		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!handle->isActive, unlock, "isActive not 0, can't send.");
-		arpc_sleep(1);// 发送间隔强制两秒
-	}
-	ARPC_LOG_NOTICE("lock session:%p.", handle->active_conn);
-	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!handle->active_conn, unlock, "active_conn is null, can't send.");
-	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(handle->status != SESSION_STA_RUN_ACTION, unlock, "status not active[%d].", handle->status);
-
 	//req->flags |= XIO_MSG_FLAG_REQUEST_READ_RECEIPT;
-	ret = xio_send_msg(handle->active_conn, req);
-	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, unlock, "xio_send_msg fail.");
-	handle->isActive = 1;
-	
+
 	if(!poneway_msg->clean_send){
-		ret = arpc_cond_wait_timeout(&handle->cond, MAX_SEND_ONEWAY_END_TIME);
+		ret = arpc_cond_init(&poneway_msg->cond);
+		LOG_ERROR_IF_VAL_TRUE(ret, "put_connection fail.");
+		arpc_cond_lock(&poneway_msg->cond);
+		
+		ret = xio_send_msg(con->xio_con, req);
+		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, unlock, "xio_send_msg fail.");
+
+		ret = arpc_cond_wait_timeout(&poneway_msg->cond, MAX_SEND_ONEWAY_END_TIME);
 		LOG_ERROR_IF_VAL_TRUE(ret, "receive rsp msg fail for time out or system fail.");
-		handle->isActive = 0;
+		arpc_cond_unlock(&poneway_msg->cond);
+		arpc_cond_destroy(&poneway_msg->cond);
+		SAFE_FREE_MEM(poneway_msg);
+		ret = put_connection(session_ctx, con);
+		LOG_ERROR_IF_VAL_TRUE(ret, "put_connection fail.");
+	}else{
+		ret = xio_send_msg(con->xio_con, req);
 	}
-	ret =arpc_cond_unlock(&handle->cond);
+	
 	return ret;
 unlock:
-	arpc_cond_unlock(&handle->cond);	//un lock
-free_buf:
+	ret = put_connection(session_ctx, con);
+	LOG_ERROR_IF_VAL_TRUE(ret, "put_connection fail.");
 	SAFE_FREE_MEM(poneway_msg);
 	return ARPC_ERROR;
 }
@@ -203,28 +200,30 @@ free_buf:
  * @param[in] oneway_msg ,a session handle
  * @return receive .0,表示发送成功，小于0则失败
  */
-int _oneway_send_complete(struct arpc_send_one_way_msg *oneway_msg)
+int _oneway_send_complete(struct arpc_send_one_way_msg *oneway_msg, void *con_usr_ctx)
 {
-	struct arpc_handle_ex *handle;
+	struct arpc_connection *con = (struct arpc_connection *)oneway_msg->usr_ctx;
+	struct arpc_session_handle *session_ctx;
 	int ret;
 	LOG_THEN_RETURN_VAL_IF_TRUE(!oneway_msg, ARPC_ERROR, "oneway_msg null, fail.");
+	LOG_THEN_RETURN_VAL_IF_TRUE(!con, ARPC_ERROR, "con null, fail.");
 
-	handle = (struct arpc_handle_ex *)oneway_msg->usr_ctx;
-	ret =arpc_cond_lock(&handle->cond);
-	handle->isActive = 0;
+	session_ctx = (struct arpc_session_handle *)con->session;
 	if (!oneway_msg->clean_send) {
-		ret = arpc_cond_notify(&handle->cond);
+		ret =arpc_cond_lock(&oneway_msg->cond);
+		LOG_ERROR_IF_VAL_TRUE(ret, "arpc_cond_unlock fail.");
+		ret = arpc_cond_notify(&oneway_msg->cond);
 		LOG_ERROR_IF_VAL_TRUE(ret, "arpc_cond_lock fail.");
-	}
-	ARPC_LOG_NOTICE("unlock session:%p.", handle->active_conn);
-	ret =arpc_cond_unlock(&handle->cond);
-	LOG_ERROR_IF_VAL_TRUE(ret, "arpc_cond_unlock fail.");
-
-	if (oneway_msg->clean_send) {
+		ret =arpc_cond_unlock(&oneway_msg->cond);
+		LOG_ERROR_IF_VAL_TRUE(ret, "arpc_cond_unlock fail.");
+	}else{
 		oneway_msg->clean_send(oneway_msg->send, oneway_msg->send_ctx);
+		ret = put_connection(session_ctx, con);
+		LOG_ERROR_IF_VAL_TRUE(!ret, "put_connection fail.");
+		SAFE_FREE_MEM(oneway_msg);
 	}
-	SAFE_FREE_MEM(oneway_msg);
-	
+
+	ARPC_LOG_NOTICE("unlock xio_con:%p.", con);
 	return 0;
 }
 /*! 
@@ -232,19 +231,19 @@ int _oneway_send_complete(struct arpc_send_one_way_msg *oneway_msg)
  * 
  * 回复一个消息个请求方（只能是请求的消息才能回复）
  * 
- * @param[in] rsp_fd ,a rsp msg handle, 由接收到消息回复时获取
+ * @param[in] rspsession_ctx ,a rsp msg handle, 由接收到消息回复时获取
  * @param[in] rsp_iov ,回复的消息
  * @param[in] release_rsp_cb ,回复结束后回调函数，用于释放调用者的回复消息资源
  * @param[in] rsp_cb_ctx , 回调函数调用者入参
  * @return int .0,表示发送成功，小于0则失败
  */
-int arpc_do_response(arpc_rsp_handle_t *rsp_fd, struct arpc_vmsg *rsp_iov, rsp_cb_t release_rsp_cb, void* rsp_cb_ctx)
+int arpc_do_response(arpc_rsp_handle_t *rspsession_ctx, struct arpc_vmsg *rsp_iov, rsp_cb_t release_rsp_cb, void* rsp_cb_ctx)
 {
-	LOG_THEN_RETURN_VAL_IF_TRUE((!rsp_fd || !*rsp_fd), ARPC_ERROR, "rsp_fd is null.");
+	LOG_THEN_RETURN_VAL_IF_TRUE((!rspsession_ctx || !*rspsession_ctx), ARPC_ERROR, "rspsession_ctx is null.");
 	LOG_THEN_RETURN_VAL_IF_TRUE((!rsp_iov), ARPC_ERROR, "rsp_iov is null.");
 	LOG_THEN_RETURN_VAL_IF_TRUE((!release_rsp_cb), ARPC_ERROR, "rsp_iov is null.");
-	_do_respone(rsp_iov, (struct xio_msg *)*rsp_fd, release_rsp_cb, rsp_cb_ctx);
-	*rsp_fd = NULL;
+	_do_respone(rsp_iov, (struct xio_msg *)*rspsession_ctx, release_rsp_cb, rsp_cb_ctx);
+	*rspsession_ctx = NULL;
 	return 0;
 }
 // 已加锁
