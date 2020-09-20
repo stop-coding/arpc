@@ -64,14 +64,16 @@ int _process_oneway_data(struct xio_msg *req,
 		rev_iov.vec = (struct arpc_iov *)vmsg_base_sglist(&req->in);
 	}
 	if (IS_SET(req->usr_flags, METHOD_ARPC_PROC_SYNC)) {
+		ARPC_LOG_DEBUG("set proc_data_cb data.");
 		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!ops->proc_data_cb, free_data, "proc_data_cb is null.");
 		ret = ops->proc_data_cb(&rev_iov, &flags, usr_ctx);
 		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, free_data, "proc_data_cb  return fail.");
 		req->usr_flags |= flags;
 		goto free_data;
 	}else {
+		ARPC_LOG_DEBUG("set proc_async_cb data.");
 		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!IS_SET(req->usr_flags, METHOD_ALLOC_DATA_BUF) && nents, 
-										free_data, "system alloc memory do not allowe deal on async.");
+										free_data, "system alloc memory do not allowe deal on async, nents[%u].", nents);
 		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!ops->free_cb, free_data, "free_cb is null, can't do async.");
 		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!ops->proc_async_cb, free_data, "proc_async_cb is null, can't do async.");
 		async_ops.alloc_cb = ops->alloc_cb;

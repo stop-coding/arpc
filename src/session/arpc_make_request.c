@@ -25,7 +25,7 @@
 
 #ifdef 	_DEF_SESSION_CLIENT
 
-#define MAX_SEND_ONEWAY_END_TIME 5*1000
+#define MAX_SEND_ONEWAY_END_TIME 60*1000
 
 typedef int (*func_xio_send_msg)(struct xio_connection *conn, struct xio_msg *msg);
 
@@ -52,10 +52,11 @@ int arpc_do_request(const arpc_session_handle_t fd, struct arpc_msg *msg, int32_
 	struct arpc_msg_data *pri_msg = NULL;
 	struct arpc_msg *rev_msg;
 	struct arpc_connection *con;
-
+	uint8_t is_crl;
 	LOG_THEN_RETURN_VAL_IF_TRUE((!session_ctx || !msg ), ARPC_ERROR, "arpc_session_handle_t fd null, exit.");
 
-	ret = get_connection(session_ctx, &con);
+	is_crl = (msg->send.total_data > IOV_DEFAULT_MAX_LEN)?1:0;
+	ret = get_connection(session_ctx, &con, is_crl);
 	LOG_THEN_RETURN_VAL_IF_TRUE(!con, ARPC_ERROR, "not idle connection fail.");
 
 	pri_msg = (struct arpc_msg_data*)msg->handle;
@@ -147,10 +148,11 @@ int arpc_send_oneway_msg(const arpc_session_handle_t fd, struct arpc_vmsg *send,
 	struct arpc_send_one_way_msg *poneway_msg;
 	uint32_t flags = 0;
 	struct arpc_connection *con;
-
+	uint8_t is_crl;
 	LOG_THEN_RETURN_VAL_IF_TRUE((!session_ctx || !send ), ARPC_ERROR, "handle null, fail.");
 
-	ret = get_connection(session_ctx, &con);
+	is_crl = (send->total_data > IOV_DEFAULT_MAX_LEN)?1:0;
+	ret = get_connection(session_ctx, &con, is_crl);
 	LOG_THEN_RETURN_VAL_IF_TRUE(!con, ARPC_ERROR, "not idle connection fail.");
 
 	poneway_msg = ARPC_MEM_ALLOC(sizeof(struct arpc_send_one_way_msg), NULL);
@@ -172,10 +174,10 @@ int arpc_send_oneway_msg(const arpc_session_handle_t fd, struct arpc_vmsg *send,
 		ret = arpc_cond_init(&poneway_msg->cond);
 		LOG_ERROR_IF_VAL_TRUE(ret, "put_connection fail.");
 		arpc_cond_lock(&poneway_msg->cond);
-		
+
 		ret = xio_send_msg(con->xio_con, req);
 		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, unlock, "xio_send_msg fail.");
-
+		ARPC_LOG_NOTICE("send end onweway xio_con:[%u][%p].", con->id, con);
 		ret = arpc_cond_wait_timeout(&poneway_msg->cond, MAX_SEND_ONEWAY_END_TIME);
 		LOG_ERROR_IF_VAL_TRUE(ret, "receive rsp msg fail for time out or system fail.");
 		arpc_cond_unlock(&poneway_msg->cond);
@@ -223,7 +225,7 @@ int _oneway_send_complete(struct arpc_send_one_way_msg *oneway_msg, void *con_us
 		SAFE_FREE_MEM(oneway_msg);
 	}
 
-	ARPC_LOG_NOTICE("unlock xio_con:%p.", con);
+	ARPC_LOG_NOTICE("send end complete xio_con:[%u][%p].", con->id, con);
 	return 0;
 }
 /*! 

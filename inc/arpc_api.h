@@ -34,6 +34,19 @@ typedef void* arpc_server_t;						/*! @brief server */
 #define _DEF_SESSION_SERVER
 #define _DEF_SESSION_CLIENT
 
+struct aprc_option{
+	uint32_t thread_max_num;	
+};
+
+/*!
+ *  @brief  arpc消息框架全局初始化，支持参数设置
+ *
+ *  @param[in] opt  aprc参数
+ *  @return  arpc_session_handle_t; (<em>NULL</em>: fail ; ( <em>非NULL</em>: succeed
+ *
+ */
+int arpc_init_r(struct aprc_option *opt);
+
 /*! 
  * @brief arpc消息框架全局初始化
  * 
@@ -234,8 +247,8 @@ struct arpc_session_ops {
 
 #define PRIVATE_HANDLE	char handle[0]						/*! @brief 私用数据段声明 */
 
-#define MAX_HEADER_DATA_LEN   1024							/*! @brief 消息体头部最大长度 */
-#define DATA_DEFAULT_MAX_LEN  (16*1024*1024)				/*! @brief 消息体数据段最大长度 16*1024*1024*/
+#define MAX_HEADER_DATA_LEN   (1024)						/*! @brief 消息体头部最大长度 */
+#define DATA_DEFAULT_MAX_LEN  (512*1024)					/*! @brief 消息体数据段最大长度 8*1024*1024*/
 #define IOV_DEFAULT_MAX_LEN   (4*1024)						/*! @brief 数据每个IOV最长长度 4*1024*/
 
 /**
@@ -370,12 +383,15 @@ int arpc_do_response(arpc_rsp_handle_t *rsp_fd, struct arpc_vmsg *rsp_iov, rsp_c
  */
 struct arpc_client_session_param {
 	struct arpc_con_info  		con;								/*! @brief 每个连接的传输类型和参数 */
-	struct arpc_session_ops		*ops;								/*! @brief 请求回复的回调函数 */
+	uint32_t					con_num;							/*! @brief 连接数量 包括读和写连接通道总数*/
+	uint32_t					rx_con_num;							/*! @brief 接收通道数量，用于读写分离，0默认为不读写分离*/
+	struct arpc_session_ops		*ops;								/*! @brief 回调函数 */
 	void 						*ops_usr_ctx;						/*! @brief 调用者的上下文参数，用于操作函数入参 */
 	uint32_t					req_data_len;						/*! @brief 申请session时的数据 */
 	void						*req_data;							/*! @brief 调用者新建session请求时，发给服务端数据 */
 };
 
+#define ARPC_CLIENT_MAX_CON_NUM 16
 /*!
  *  @brief  创建session客户端实例
  *
@@ -460,7 +476,7 @@ struct arpc_new_session_rsp{
 	uint32_t						rsp_data_len;
 	enum arpc_new_session_status	ret_status;					/*! @brief 应答当前新建session调用者返回值，ARPC_E_STATUS_OK是可以建立，其它则失败*/
 	struct arpc_session_ops			*ops;						/*! @brief 设置当前session的回调函数，可选，默认使用注册时回调函数*/
-	void							*ops_new_ctx;				/*! @brief 回调函数上下文参数 */
+	void							*ops_new_ctx;				/*! @brief 新session的回调函数上下文参数 */
 	void							*private;					/*! @brief 调用者私有数据 */
 	uint32_t						private_len;				/*! @brief 调用者私有数据长度 */
 };
@@ -476,11 +492,17 @@ struct arpc_server_param {
 	/*! @brief 每个连接的传输类型和参数 */
 	struct arpc_con_info 	   		con;
 	
+	/*! @brief 工作线程数，用于并发，如果为0则使用默认值1，则只有一个主线程 */
+	int32_t 	   		work_num;
+
 	/*! @brief 收到申请建立session请求时回调，用于处理调用者逻辑和输出回复消息*/
 	int (*new_session_start)(const struct arpc_new_session_req *, struct arpc_new_session_rsp *, void *server_ctx);
 
 	/*! @brief 消息框架新建session后回调，用于释放调用者回复消息的资源*/
 	int (*new_session_end)(arpc_session_handle_t, struct arpc_new_session_rsp *, void *server_ctx);
+
+	/*! @brief 消息框架sessions释放后回调函数，用于释放调用者回复消息的资源*/
+	int (*session_teardown)(const arpc_session_handle_t, void *usr_server_ctx, void *usr_session_ctx);
 
 	/*! @brief server 服务的用户上下文 */
 	void 							*server_ctx;
@@ -491,7 +513,7 @@ struct arpc_server_param {
 	/*! @brief 作为消息处理函数的入参 */
 	void 							*default_ops_usr_ctx;
 
-	/*! @brief IOV数据深度 选填*/
+	/*! @brief IOV数据深度 选填，默认为4*1024*/
 	uint32_t						iov_max_len;
 };
 

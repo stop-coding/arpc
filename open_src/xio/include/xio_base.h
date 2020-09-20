@@ -54,13 +54,13 @@ extern "C" {
  * @def XIO_IOVLEN
  * @brief array size of data IO vector in message
  */
-#define XIO_IOVLEN			1024
+#define XIO_IOVLEN			256
 
 /**
  * @def XIO_MAX_IOV
  * @brief maximum size of data IO vector in message
  */
-#define XIO_MAX_IOV			1024
+#define XIO_MAX_IOV			512
 
 /*---------------------------------------------------------------------------*/
 /* opaque data structures                                                    */

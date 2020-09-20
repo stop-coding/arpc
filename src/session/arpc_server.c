@@ -33,15 +33,10 @@ struct arpc_new_session_ctx{
 	void *server_usr_ctx;
 };
 
-static int _msg_error(struct xio_session *session,
-			    enum xio_status error,
-			    enum xio_msg_direction dir,
-			    struct xio_msg  *rsp,
-			    void *cb_user_context)
-{
-	ARPC_LOG_NOTICE("msg_error message. ");
-	return 0;
-}
+static int _ow_msg_send_complete(struct xio_session *session,
+				    struct xio_msg *msg,
+				    void *conn_user_context);
+					
 static int server_session_event(struct xio_session *session, struct xio_session_event_data *event_data, void *cb_user_context)
 {
 	struct xio_connection_attr attr;
@@ -203,6 +198,32 @@ reject:
 	return -1;
 }
 
+static int _msg_error(struct xio_session *session,
+			    enum xio_status error,
+			    enum xio_msg_direction dir,
+			    struct xio_msg  *rsp,
+			    void *conn_user_context)
+{
+	SESSION_CONN_CTX(conn, conn_user_context);
+	ARPC_LOG_ERROR("msg_error message,dir:%d, err:%d. ", dir, error);
+	switch(dir) {
+		case XIO_MSG_DIRECTION_OUT:
+			if(rsp->type == XIO_MSG_TYPE_REQ) {
+				_arpc_rev_request_rsp(rsp);
+			}else if(rsp->type == XIO_MSG_TYPE_ONE_WAY){
+				_ow_msg_send_complete(session, rsp, conn_user_context);
+			}else if(rsp->type == XIO_MSG_TYPE_RSP) {
+				_process_send_rsp_complete(rsp, conn_user_context);
+			}
+			break;
+		case XIO_MSG_DIRECTION_IN:
+			break; 
+		default:
+			break;
+	}
+	return 0;
+}
+
 static int _rsp_send_complete(struct xio_session *session,
 				    struct xio_msg *rsp,
 				    void *conn_user_context)
@@ -228,7 +249,7 @@ static int _server_msg_header_dispatch(struct xio_session *session,
 	SESSION_CONN_OPS_CTX(conn, conn_ops, conn_user_context);
 
 	ARPC_LOG_DEBUG("header message type:%d", msg->type);
-	ARPC_LOG_NOTICE("##### _server_msg_header_dispatch usr_ops_ctx:%p.", conn->usr_ops_ctx);
+	ARPC_LOG_DEBUG("##### _server_msg_header_dispatch usr_ops_ctx:%p.", conn->usr_ops_ctx);
 	switch(msg->type) {
 		case XIO_MSG_TYPE_REQ:
 			ret = _process_request_header(msg, &conn_ops->req_ops, IOV_DEFAULT_MAX_LEN, conn->usr_ops_ctx);
@@ -262,6 +283,8 @@ static int _server_msg_data_dispatch(struct xio_session *session,
 			ret = _process_rsp_data(rsp, last_in_rxq);
 			break;
 		case XIO_MSG_TYPE_ONE_WAY:
+			ret = set_connection_rx_mode(conn);
+			LOG_ERROR_IF_VAL_TRUE(ret, "set_connection_rx_mode fail.");
 			ret = _process_oneway_data(rsp, &conn_ops->oneway_ops, last_in_rxq, conn->usr_ops_ctx);
 			break;
 		default:
@@ -320,8 +343,10 @@ arpc_server_t arpc_server_create(const struct arpc_server_param *param)
 
 	ret = get_uri(&con_param, server->uri, URI_MAX_LEN);
 	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, error_1, "arpc_create_server fail");
-
-	work_num = (param->work_num)? param->work_num : 0; // 默认只有一个主线程
+	work_num = tp_get_pool_idle_num(server->threadpool);
+	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(work_num < ARPC_MIN_THREAD_IDLE_NUM, error_1, "idle thread num is low then min [%u]", ARPC_MIN_THREAD_IDLE_NUM);
+	work_num = work_num - ARPC_MIN_THREAD_IDLE_NUM;
+	work_num = (param->work_num && param->work_num <= work_num)? param->work_num : 2; // 默认只有1个主线程,2个工作线程
 	for (i = 0; i < work_num; i++) {
 		con_param.ipv4.port++; // 端口递增
 		work_handle = arpc_create_xio_server_work(&con_param, server->threadpool, &x_server_ops, i);
@@ -339,7 +364,7 @@ arpc_server_t arpc_server_create(const struct arpc_server_param *param)
 
 	server->usr_context = param->default_ops_usr_ctx;
 
-	ARPC_LOG_NOTICE("Create server[%p] success.", server);
+	ARPC_LOG_NOTICE("Create main server[%p] success, work server num[%u].", server, server->work_num);
 
 	return (arpc_server_t)server;
 

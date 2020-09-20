@@ -56,6 +56,12 @@ enum arpc_connection_type{
 	ARPC_CON_TYPE_SERVER, 	//
 };
 
+enum arpc_connection_direct{
+	ARPC_CON_DIRE_IO = 0,
+	ARPC_CON_DIRE_OUT, //
+	ARPC_CON_DIRE_IN,  //
+};
+
 struct arpc_con_client {
 	struct xio_context			*xio_con_ctx;			/* connection thread 上下文 */
 	int32_t						affinity;				/* 绑定CPU */
@@ -71,6 +77,7 @@ struct arpc_con_server {
 struct arpc_connection {
 	QUEUE 						q;
 	uint32_t					magic;
+	uint32_t					id;
 	struct xio_connection		*xio_con;				/* connection 资源*/
 	enum arpc_connection_type   type;
 	struct arpc_cond 			cond;
@@ -81,6 +88,8 @@ struct arpc_connection {
 	void						*usr_ops_ctx;
 	uint32_t					flags;
 	uint8_t						is_busy;
+	struct timeval 				access_time;
+	enum arpc_connection_direct	direct;
 	union
 	{
 		struct arpc_con_client client;
@@ -154,8 +163,10 @@ int arpc_destroy_session(struct arpc_session_handle* session);
 
 int session_insert_con(struct arpc_session_handle *s, struct arpc_connection *con);
 int session_remove_con(struct arpc_session_handle *s, struct arpc_connection *con);
-int get_connection(struct arpc_session_handle *s, struct arpc_connection **con);
+int get_connection(struct arpc_session_handle *s, struct arpc_connection **con, uint8_t is_crl);
 int put_connection(struct arpc_session_handle *s, struct arpc_connection *con);
+int set_connection_rx_mode(struct arpc_connection *con);
+int set_connection_tx_mode(struct arpc_connection *con);
 
 int rebuild_session(struct arpc_session_handle *ses);
 

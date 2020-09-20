@@ -582,7 +582,7 @@ static int xio_tcp_write_send_data(
 	XIO_TO_TCP_TASK(task, tcp_task);
 	size_t			i;
 	size_t			byte_len = 0;
-	struct xio_sg_table_ops	*sgtbl_ops;
+	struct xio_sg_table_ops	*sgtbl_ops = NULL;
 	void			*sgtbl;
 	void			*sg;
 
@@ -590,7 +590,7 @@ static int xio_tcp_write_send_data(
 	sgtbl_ops	= (struct xio_sg_table_ops *)
 				xio_sg_table_ops_get(task->omsg->out.sgl_type);
 
-	/* user provided mr */
+	/* user provided mr !tcp_options.enable_mr_check*/
 	sg = sge_first(sgtbl_ops, sgtbl);
 	if (sge_mr(sgtbl_ops, sg) || !tcp_options.enable_mr_check) {
 		for_each_sge(sgtbl, sgtbl_ops, sg, i) {
@@ -605,6 +605,7 @@ static int xio_tcp_write_send_data(
 				tbl_nents(sgtbl_ops, sgtbl) + 1;
 		tcp_task->txd.tot_iov_byte_len = byte_len;
 	} else {
+		ERROR_LOG("xio_tcp_send_msg failed\n");
 		/* copy to internal buffer */
 		for_each_sge(sgtbl, sgtbl_ops, sg, i) {
 			/* copy the data into internal buffer */

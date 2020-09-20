@@ -25,6 +25,7 @@
 
 #ifdef 	_DEF_SESSION_CLIENT
 
+
 #define CLIENT_SESSION_CTX(ctx, session_fd, usr_ctx)	\
 struct arpc_client_ctx *ctx = NULL;\
 struct arpc_session_handle *session_fd = (struct arpc_session_handle *)usr_ctx;\
@@ -33,6 +34,7 @@ do{\
 		ctx = (struct arpc_client_ctx *)session_fd->ex_ctx;\
 }while(0);
 
+static int _ow_msg_send_complete(struct xio_session *session, struct xio_msg *msg, void *conn_user_context);
 
 /* ################## struct ###################*/
 struct arpc_client_ctx {
@@ -120,9 +122,26 @@ static int msg_error(struct xio_session *session,
 			    enum xio_status error,
 			    enum xio_msg_direction dir,
 			    struct xio_msg  *rsp,
-			    void *cb_user_context)
+			    void *conn_user_context)
 {
-	ARPC_LOG_ERROR("msg_error message to do. ");
+	int ret = 0;
+	SESSION_CONN_CTX(conn, conn_user_context);
+	ARPC_LOG_ERROR("msg_error message,dir:%d, err:%d. ", dir, error);
+	switch(dir) {
+		case XIO_MSG_DIRECTION_OUT:
+			if(rsp->type == XIO_MSG_TYPE_REQ) {
+				_arpc_rev_request_rsp(rsp);
+			}else if(rsp->type == XIO_MSG_TYPE_ONE_WAY){
+				_ow_msg_send_complete(session, rsp, conn_user_context);
+			}else if(rsp->type == XIO_MSG_TYPE_RSP) {
+				_process_send_rsp_complete(rsp, conn_user_context);
+			}
+			break;
+		case XIO_MSG_DIRECTION_IN:
+			break; 
+		default:
+			break;
+	}
 	return 0;
 }
 
@@ -164,6 +183,8 @@ static int _client_msg_data_dispatch(struct xio_session *session,
 			ret = _process_rsp_data(rsp, last_in_rxq);
 			break;
 		case XIO_MSG_TYPE_ONE_WAY:
+			//ret = set_connection_rx_mode(conn);
+			//LOG_ERROR_IF_VAL_TRUE(ret, "set_connection_rx_mode fail.");
 			ret = _process_oneway_data(rsp, &conn_ops->oneway_ops, last_in_rxq, conn->usr_ops_ctx);
 			break;
 		default:
@@ -218,10 +239,10 @@ arpc_session_handle_t arpc_client_create_session(const struct arpc_client_sessio
 	struct arpc_client_ctx *client_ctx = NULL;
 	struct arpc_session_handle *session = NULL;
 	struct tp_thread_work thread;
-	uint32_t con_num;
+	uint32_t idle_thread_num;
 	struct arpc_connection *con;
 	struct xio_connection_params xio_con_param;
-
+	uint32_t rx_con_num = 0;
 	//LOG_THEN_RETURN_VAL_IF_TRUE(!param->ops, NULL, "ops is null.");
 
 	session = arpc_create_session(SESSION_CLIENT, sizeof(struct arpc_client_ctx));
@@ -250,19 +271,29 @@ arpc_session_handle_t arpc_client_create_session(const struct arpc_client_sessio
 	session->xio_s = xio_session_create(&client_ctx->xio_param);
 	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!session->xio_s, error_2, "xio_session_create fail.");
 
-	con_num = arpc_thread_max_num();
-	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!con_num, error_2, "arpc_thread_max_num is 0.");
-	con_num = con_num/2;
-	con_num = (param->con_num && param->con_num < con_num)? param->con_num : con_num; // 默认是两个链接
+	idle_thread_num = tp_get_pool_idle_num(session->threadpool);
+	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(idle_thread_num < ARPC_MIN_THREAD_IDLE_NUM, error_2, "idle_thread_num[%u] is low 2.", idle_thread_num);
 
-	for (i = 0; i < con_num; i++) {
+	ARPC_LOG_NOTICE("Max idle thread num[%u], user expact max num[%u].", idle_thread_num, param->con_num);
+	idle_thread_num = idle_thread_num - ARPC_MIN_THREAD_IDLE_NUM;
+	idle_thread_num = (param->con_num && param->con_num < idle_thread_num)? param->con_num : idle_thread_num; // 默认是两个链接
+
+	idle_thread_num = (idle_thread_num < ARPC_CLIENT_MAX_CON_NUM)? idle_thread_num: ARPC_CLIENT_MAX_CON_NUM;
+
+	rx_con_num = (param->rx_con_num > 1 )? param->rx_con_num: 1; //至少保留一个接收通道
+	for (i = 0; i < idle_thread_num; i++) {
 		con = arpc_create_con(ARPC_CON_TYPE_CLIENT, session, i);
 		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!con, error_2, "arpc_create_xio_client_con fail.");
-		ret = arpc_wait_connected(con, 5*1000);
+		ret = arpc_wait_connected(con, 10*1000);
 		LOG_ERROR_IF_VAL_TRUE(ret, "wait_connection_finished timeout, continue.");
+		if(rx_con_num){
+			rx_con_num--;
+			set_connection_rx_mode(con);
+			ARPC_LOG_NOTICE("connection[%u][%p] set rx mode!!", i, con);
+		}
 	}
 
-	ARPC_LOG_NOTICE("Create session[%p] success!!", session);
+	ARPC_LOG_NOTICE("Create session[%p] success, work thread num[%u]!!", session, idle_thread_num);
 
 	return (arpc_session_handle_t)session;
 

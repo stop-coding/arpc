@@ -287,8 +287,11 @@ work_handle_t tp_post_one_work(tp_handle fd, struct tp_thread_work *w, uint8_t a
   }
   pthread_mutex_lock(&pool->mutex);
   QUEUE_INSERT_TAIL(&pool->wait_to_run, &work->queue);
-  if (pool->idle_num > 0)
-    pthread_cond_signal(&pool->cond);
+  if (pool->idle_num > 0){
+    	pthread_cond_signal(&pool->cond);
+  }else{
+	  TP_LOG_NOTICE("not free thread to done, idle:%u, total:%u.", pool->idle_num, pool->thread_num);
+  }
   pthread_mutex_unlock(&pool->mutex);
   return work;
 error:
@@ -376,4 +379,16 @@ uint64_t tp_get_work_thread_id(work_handle_t w)
 		return (uint64_t)work->thread_id;
 	}
 	return 0;
+}
+
+uint32_t tp_get_pool_idle_num(tp_handle fd)
+{
+	struct _thread_pool_msg *pool = (struct _thread_pool_msg *)fd;
+  	int ret;
+	uint32_t idle = 0;
+  	LOG_THEN_RETURN_VAL_IF_TRUE((!pool), 0,"pool null or w null fail.");
+	pthread_mutex_lock(&pool->mutex);
+	idle = pool->idle_num;
+  	pthread_mutex_unlock(&pool->mutex);
+	return idle;
 }

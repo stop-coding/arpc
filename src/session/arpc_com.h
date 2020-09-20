@@ -229,6 +229,9 @@ inline static int arpc_cond_destroy(struct arpc_cond *cond)
 #define FLAG_RSP_USER_DATA 			6
 #define FLAG_MSG_ERROR_DISCARD_DATA 7
 
+// 最小空闲的线程数
+#define ARPC_MIN_THREAD_IDLE_NUM    3
+
 enum session_status{
 	SESSION_STA_INIT = 0, 	 //初始化完毕
 	SESSION_STA_RUN, 		//运行

@@ -27,6 +27,9 @@
 
 static const uint32_t conn_magic = 0xff538770;
 
+#define ACCESS_CON_INTERVAL_TIME_US  (800*1000)
+#define IN_MODE_CON_INTERVAL_TIME_S  (10)
+
 // client
 static struct arpc_connection *arpc_create_connection();
 static int arpc_destroy_connection(struct arpc_connection* con);
@@ -143,12 +146,12 @@ int session_remove_con(struct arpc_session_handle *s, struct arpc_connection *co
 	return 0;
 }
 
-int get_connection(struct arpc_session_handle *s, struct arpc_connection **pcon)
+int get_connection(struct arpc_session_handle *s, struct arpc_connection **pcon, uint8_t is_crl)
 {
 	int ret;
 	QUEUE* iter;
 	struct arpc_connection *con = NULL;
-
+	struct timeval now;
 	LOG_THEN_RETURN_VAL_IF_TRUE(!pcon, ARPC_ERROR, "pcon is null.");
 
 	ret = arpc_mutex_lock(&s->lock);
@@ -161,20 +164,63 @@ int get_connection(struct arpc_session_handle *s, struct arpc_connection **pcon)
 	{
 		con = QUEUE_DATA(iter, struct arpc_connection, q);
 		arpc_rwlock_wrlock(&con->rwlock);
-		if((!con->is_busy) && (con->status == XIO_STA_RUN_ACTION)){
+		ARPC_LOG_NOTICE("connection[%u][%p], status: %d|%d,dir:%d.",con->id, con->xio_con, con->is_busy, con->status, con->direct);
+		if((!con->is_busy) && (con->status == XIO_STA_RUN_ACTION) 
+				&& (con->direct == ARPC_CON_DIRE_OUT || con->direct == ARPC_CON_DIRE_IO)){
 			con->is_busy = 1;
 			arpc_rwlock_unlock(&con->rwlock);
 			break;
-		}else{
-			ARPC_LOG_ERROR("connection[%p] is busy, status: %d|%d.", con->xio_con,con->is_busy, con->status);
 		}
 		arpc_rwlock_unlock(&con->rwlock);
 		con = NULL;
 	});
 	arpc_mutex_unlock(&s->lock);
 	*pcon = con;
+
+	//流控
+	if (con && is_crl) {
+		gettimeofday(&now, NULL);	// 线程安全
+		if((now.tv_usec < con->access_time.tv_usec + ACCESS_CON_INTERVAL_TIME_US) && (con->access_time.tv_sec == now.tv_sec)){
+			ARPC_LOG_NOTICE("send too overload, control need sleep some time.");
+			arpc_usleep(ACCESS_CON_INTERVAL_TIME_US);
+		}else if(now.tv_sec < con->access_time.tv_sec + 1) {
+			ARPC_LOG_NOTICE("send too overload, control need sleep some time.");
+			arpc_usleep(ACCESS_CON_INTERVAL_TIME_US/4);
+		}
+		con->access_time = now;
+	}
+
 	return (con)?0:-1;
 }
+
+int set_connection_rx_mode(struct arpc_connection *con)
+{
+	struct timeval now;
+	
+	LOG_THEN_RETURN_VAL_IF_TRUE(!con, ARPC_ERROR, "arpc_connection is null.");
+	gettimeofday(&now, NULL);
+	arpc_rwlock_wrlock(&con->rwlock);
+	con->direct = ARPC_CON_DIRE_IN; // 输入模式
+	con->is_busy = 1;
+	ARPC_LOG_NOTICE("set connection[%u][%p] rx mode.", con->id, con);
+	arpc_rwlock_unlock(&con->rwlock);
+	return 0;
+}
+
+int set_connection_tx_mode(struct arpc_connection *con)
+{
+	struct timeval now;
+	
+	LOG_THEN_RETURN_VAL_IF_TRUE(!con, ARPC_ERROR, "arpc_connection is null.");
+	gettimeofday(&now, NULL);
+	arpc_rwlock_wrlock(&con->rwlock);
+	con->direct = ARPC_CON_DIRE_OUT; // 输入模式
+	con->is_busy = 1;
+	ARPC_LOG_NOTICE("set connection[%u][%p] rx mode.", con->id, con);
+	arpc_rwlock_unlock(&con->rwlock);
+	return 0;
+}
+
 
 int put_connection(struct arpc_session_handle *s, struct arpc_connection *con)
 {
@@ -188,10 +234,14 @@ int put_connection(struct arpc_session_handle *s, struct arpc_connection *con)
 		arpc_mutex_unlock(&s->lock);
 		return ARPC_ERROR;
 	}
+	QUEUE_REMOVE(&con->q);
+	QUEUE_INSERT_TAIL(&s->q_con, &con->q);
+	arpc_mutex_unlock(&s->lock);
+
 	arpc_rwlock_wrlock(&con->rwlock);
 	con->is_busy = 0;
 	arpc_rwlock_unlock(&con->rwlock);
-	arpc_mutex_unlock(&s->lock);
+
 	return 0;
 }
 
@@ -211,6 +261,7 @@ struct arpc_connection *arpc_create_con(enum arpc_connection_type type,
 		ARPC_LOG_ERROR("unkown connetion type[%d]", type);
 		return NULL;
 	}
+	con->id = s->conn_num;
 	con->type = type;
 	con->session = s;
 	con->usr_ops_ctx = s->usr_context;
@@ -259,6 +310,8 @@ int  arpc_wait_connected(struct arpc_connection *con, uint64_t timeout_ms)
 		if(con->xio_con && (con->is_busy || con->status != XIO_STA_RUN_ACTION)){
 			ret = arpc_cond_wait_timeout(&con->cond, timeout_ms);
 			LOG_ERROR_IF_VAL_TRUE(ret, "wait connection finished timeout con[%p].", con);
+			if (!ret)
+				ARPC_LOG_NOTICE(" clinet connection[%u][%p] build success!!", con->id,con);
 		}
 		arpc_cond_unlock(&con->cond);
 	}else{
@@ -459,6 +512,7 @@ static struct arpc_connection *arpc_create_xio_server_con(struct arpc_session_ha
 	con = arpc_create_connection();
 	LOG_THEN_RETURN_VAL_IF_TRUE(!con, NULL, "arpc_create_connection fail.");
 	con->status = XIO_STA_RUN_ACTION;
+	con->is_busy = 0;
 	return con;
 }
 
@@ -493,7 +547,7 @@ static struct arpc_connection *arpc_create_xio_client_con(struct arpc_session_ha
 	thread.loop = &xio_client_run_con;
 	thread.stop = &xio_client_stop_con;
 	thread.usr_ctx = (void*)con;
-
+	
 	ret = arpc_cond_lock(&con->cond);
 	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, free_xio_con, "arpc_cond_lock fail.");
 
@@ -541,7 +595,7 @@ static struct arpc_connection *arpc_create_connection()
 {
 	int ret = 0;
 	struct arpc_connection *con = NULL;
-	
+	struct timeval 				now;
 	/* handle*/
 	con = (struct arpc_connection *)ARPC_MEM_ALLOC(sizeof(struct arpc_connection), NULL);
 	if (!con) {
@@ -557,6 +611,8 @@ static struct arpc_connection *arpc_create_connection()
 	QUEUE_INIT(&con->q);
 	con->is_busy = 1;
 	con->magic = conn_magic;
+	gettimeofday(&now, NULL);	// 线程安全
+	con->access_time = now;
 	return con;
 }
 

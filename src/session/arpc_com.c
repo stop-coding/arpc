@@ -30,7 +30,7 @@ struct aprc_paramter{
 };
 
 static struct aprc_paramter g_param= {
-	.thread_max_num = 10,	//默认是个线程
+	.thread_max_num = 15,	//默认是个线程
 	.thread_pool	= NULL,
 };
 
@@ -323,7 +323,7 @@ int _create_header_source(struct xio_msg *msg, struct _proc_header_func *ops, ui
 	msg->usr_flags = flag;
 	// alloc data buf form user define call back
 	if (!IS_SET(msg->usr_flags, METHOD_ALLOC_DATA_BUF)) {
-		ARPC_LOG_DEBUG("not need alloc data buf.");
+		ARPC_LOG_NOTICE("not need alloc data buf.");
 		return ARPC_ERROR;
 	}
 
@@ -341,8 +341,7 @@ int _create_header_source(struct xio_msg *msg, struct _proc_header_func *ops, ui
 	last_size = (last_size)? last_size :iov_max_len;
 	LOG_THEN_GOTO_TAG_IF_VAL_TRUE((!msg->in.data_tbl.sglist), error, "calloc fail.");
 
-	ARPC_LOG_NOTICE("get msg, nent:%u, iov_max_len:%lu, total_size:%lu", nents, iov_max_len, msg->in.total_data_len);
-	
+	ARPC_LOG_DEBUG("get msg, nent:%u, iov_max_len:%lu, total_size:%lu", nents, iov_max_len, msg->in.total_data_len);
 	for (i = 0; i < nents - 1; i++) {
 		sglist[i].iov_len = iov_max_len;
 		sglist[i].iov_base = ops->alloc_cb(sglist[i].iov_len, usr_ctx);
@@ -351,7 +350,7 @@ int _create_header_source(struct xio_msg *msg, struct _proc_header_func *ops, ui
 	}
 	sglist[i].iov_len = last_size;
 	sglist[i].iov_base = ops->alloc_cb(sglist[i].iov_len, usr_ctx);
-	ARPC_LOG_NOTICE("i:%u ,data:%p, len:%lu.",i, sglist[i].iov_base, sglist[i].iov_len);
+	ARPC_LOG_DEBUG("i:%u ,data:%p, len:%lu.",i, sglist[i].iov_base, sglist[i].iov_len);
 	// 出参
 	msg->in.data_tbl.sglist = (void*)sglist;
 	vmsg_sglist_set_nents(&msg->in, nents);
