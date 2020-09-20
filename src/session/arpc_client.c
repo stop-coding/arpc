@@ -288,7 +288,7 @@ arpc_session_handle_t arpc_client_create_session(const struct arpc_client_sessio
 		LOG_ERROR_IF_VAL_TRUE(ret, "wait_connection_finished timeout, continue.");
 		if(rx_con_num){
 			rx_con_num--;
-			set_connection_rx_mode(con);
+			set_connection_mode(con, ARPC_CON_MODE_DIRE_IN);
 			ARPC_LOG_NOTICE("connection[%u][%p] set rx mode!!", i, con);
 		}
 	}

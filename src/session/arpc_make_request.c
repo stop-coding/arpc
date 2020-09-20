@@ -151,7 +151,7 @@ int arpc_send_oneway_msg(const arpc_session_handle_t fd, struct arpc_vmsg *send,
 	uint8_t is_crl;
 	LOG_THEN_RETURN_VAL_IF_TRUE((!session_ctx || !send ), ARPC_ERROR, "handle null, fail.");
 
-	is_crl = (send->total_data > IOV_DEFAULT_MAX_LEN)?1:0;
+	is_crl = (send->total_data > 4*IOV_DEFAULT_MAX_LEN)?1:0;
 	ret = get_connection(session_ctx, &con, is_crl);
 	LOG_THEN_RETURN_VAL_IF_TRUE(!con, ARPC_ERROR, "not idle connection fail.");
 
@@ -177,7 +177,9 @@ int arpc_send_oneway_msg(const arpc_session_handle_t fd, struct arpc_vmsg *send,
 
 		ret = xio_send_msg(con->xio_con, req);
 		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, unlock, "xio_send_msg fail.");
-		ARPC_LOG_NOTICE("send end onweway xio_con:[%u][%p].", con->id, con);
+		
+		ARPC_LOG_DEBUG("send end onweway xio_con:[%u][%p].", con->id, con);
+
 		ret = arpc_cond_wait_timeout(&poneway_msg->cond, MAX_SEND_ONEWAY_END_TIME);
 		LOG_ERROR_IF_VAL_TRUE(ret, "receive rsp msg fail for time out or system fail.");
 		arpc_cond_unlock(&poneway_msg->cond);
@@ -225,7 +227,7 @@ int _oneway_send_complete(struct arpc_send_one_way_msg *oneway_msg, void *con_us
 		SAFE_FREE_MEM(oneway_msg);
 	}
 
-	ARPC_LOG_NOTICE("send end complete xio_con:[%u][%p].", con->id, con);
+	ARPC_LOG_DEBUG("send end complete xio_con:[%u][%p].", con->id, con);
 	return 0;
 }
 /*! 

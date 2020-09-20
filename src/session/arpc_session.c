@@ -27,7 +27,7 @@
 
 static const uint32_t conn_magic = 0xff538770;
 
-#define ACCESS_CON_INTERVAL_TIME_US  (800*1000)
+#define ACCESS_CON_INTERVAL_TIME_US  (50*1000)
 #define IN_MODE_CON_INTERVAL_TIME_S  (10)
 
 // client
@@ -164,9 +164,11 @@ int get_connection(struct arpc_session_handle *s, struct arpc_connection **pcon,
 	{
 		con = QUEUE_DATA(iter, struct arpc_connection, q);
 		arpc_rwlock_wrlock(&con->rwlock);
-		ARPC_LOG_NOTICE("connection[%u][%p], status: %d|%d,dir:%d.",con->id, con->xio_con, con->is_busy, con->status, con->direct);
-		if((!con->is_busy) && (con->status == XIO_STA_RUN_ACTION) 
-				&& (con->direct == ARPC_CON_DIRE_OUT || con->direct == ARPC_CON_DIRE_IO)){
+		ARPC_LOG_DEBUG("connection[%u][%p], status: %d|%d,dir:%d.",con->id, con->xio_con, con->is_busy, con->status, con->conn_mode);
+		if((!con->is_busy) && 
+			(con->status == XIO_STA_RUN_ACTION) && 
+			(con->conn_mode == ARPC_CON_MODE_DIRE_OUT || 
+			con->conn_mode == ARPC_CON_MODE_DIRE_IO)) {
 			con->is_busy = 1;
 			arpc_rwlock_unlock(&con->rwlock);
 			break;
@@ -181,11 +183,8 @@ int get_connection(struct arpc_session_handle *s, struct arpc_connection **pcon,
 	if (con && is_crl) {
 		gettimeofday(&now, NULL);	// 线程安全
 		if((now.tv_usec < con->access_time.tv_usec + ACCESS_CON_INTERVAL_TIME_US) && (con->access_time.tv_sec == now.tv_sec)){
-			ARPC_LOG_NOTICE("send too overload, control need sleep some time.");
+			ARPC_LOG_NOTICE("warning: send overload, wait time [%d] ms.", ACCESS_CON_INTERVAL_TIME_US/1000);
 			arpc_usleep(ACCESS_CON_INTERVAL_TIME_US);
-		}else if(now.tv_sec < con->access_time.tv_sec + 1) {
-			ARPC_LOG_NOTICE("send too overload, control need sleep some time.");
-			arpc_usleep(ACCESS_CON_INTERVAL_TIME_US/4);
 		}
 		con->access_time = now;
 	}
@@ -193,34 +192,19 @@ int get_connection(struct arpc_session_handle *s, struct arpc_connection **pcon,
 	return (con)?0:-1;
 }
 
-int set_connection_rx_mode(struct arpc_connection *con)
+int set_connection_mode(struct arpc_connection *con, enum arpc_connection_mode	conn_mode)
 {
 	struct timeval now;
 	
 	LOG_THEN_RETURN_VAL_IF_TRUE(!con, ARPC_ERROR, "arpc_connection is null.");
 	gettimeofday(&now, NULL);
 	arpc_rwlock_wrlock(&con->rwlock);
-	con->direct = ARPC_CON_DIRE_IN; // 输入模式
+	con->conn_mode = conn_mode; // 输入模式
 	con->is_busy = 1;
-	ARPC_LOG_NOTICE("set connection[%u][%p] rx mode.", con->id, con);
+	ARPC_LOG_DEBUG("set connection[%u][%p] mode[%d].", con->id, con, conn_mode);
 	arpc_rwlock_unlock(&con->rwlock);
 	return 0;
 }
-
-int set_connection_tx_mode(struct arpc_connection *con)
-{
-	struct timeval now;
-	
-	LOG_THEN_RETURN_VAL_IF_TRUE(!con, ARPC_ERROR, "arpc_connection is null.");
-	gettimeofday(&now, NULL);
-	arpc_rwlock_wrlock(&con->rwlock);
-	con->direct = ARPC_CON_DIRE_OUT; // 输入模式
-	con->is_busy = 1;
-	ARPC_LOG_NOTICE("set connection[%u][%p] rx mode.", con->id, con);
-	arpc_rwlock_unlock(&con->rwlock);
-	return 0;
-}
-
 
 int put_connection(struct arpc_session_handle *s, struct arpc_connection *con)
 {
@@ -236,11 +220,10 @@ int put_connection(struct arpc_session_handle *s, struct arpc_connection *con)
 	}
 	QUEUE_REMOVE(&con->q);
 	QUEUE_INSERT_TAIL(&s->q_con, &con->q);
-	arpc_mutex_unlock(&s->lock);
-
 	arpc_rwlock_wrlock(&con->rwlock);
 	con->is_busy = 0;
 	arpc_rwlock_unlock(&con->rwlock);
+	arpc_mutex_unlock(&s->lock);
 
 	return 0;
 }

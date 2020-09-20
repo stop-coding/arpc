@@ -56,10 +56,10 @@ enum arpc_connection_type{
 	ARPC_CON_TYPE_SERVER, 	//
 };
 
-enum arpc_connection_direct{
-	ARPC_CON_DIRE_IO = 0,
-	ARPC_CON_DIRE_OUT, //
-	ARPC_CON_DIRE_IN,  //
+enum arpc_connection_mode{
+	ARPC_CON_MODE_DIRE_IO = 0,
+	ARPC_CON_MODE_DIRE_OUT, //
+	ARPC_CON_MODE_DIRE_IN,  //
 };
 
 struct arpc_con_client {
@@ -89,7 +89,7 @@ struct arpc_connection {
 	uint32_t					flags;
 	uint8_t						is_busy;
 	struct timeval 				access_time;
-	enum arpc_connection_direct	direct;
+	enum arpc_connection_mode	conn_mode;
 	union
 	{
 		struct arpc_con_client client;
@@ -165,8 +165,7 @@ int session_insert_con(struct arpc_session_handle *s, struct arpc_connection *co
 int session_remove_con(struct arpc_session_handle *s, struct arpc_connection *con);
 int get_connection(struct arpc_session_handle *s, struct arpc_connection **con, uint8_t is_crl);
 int put_connection(struct arpc_session_handle *s, struct arpc_connection *con);
-int set_connection_rx_mode(struct arpc_connection *con);
-int set_connection_tx_mode(struct arpc_connection *con);
+int set_connection_mode(struct arpc_connection *con, enum arpc_connection_mode conn_mode);
 
 int rebuild_session(struct arpc_session_handle *ses);
 

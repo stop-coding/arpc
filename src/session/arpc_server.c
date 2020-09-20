@@ -258,6 +258,8 @@ static int _server_msg_header_dispatch(struct xio_session *session,
 			ret = _process_rsp_header(msg, conn->usr_ops_ctx);
 			break;
 		case XIO_MSG_TYPE_ONE_WAY:
+			ret = set_connection_mode(conn, ARPC_CON_MODE_DIRE_IN);
+			LOG_ERROR_IF_VAL_TRUE(ret, "set_connection_rx_mode fail.");
 			ret = _process_oneway_header(msg, &conn_ops->oneway_ops, IOV_DEFAULT_MAX_LEN, conn->usr_ops_ctx);
 			break;
 		default:
@@ -283,9 +285,9 @@ static int _server_msg_data_dispatch(struct xio_session *session,
 			ret = _process_rsp_data(rsp, last_in_rxq);
 			break;
 		case XIO_MSG_TYPE_ONE_WAY:
-			ret = set_connection_rx_mode(conn);
-			LOG_ERROR_IF_VAL_TRUE(ret, "set_connection_rx_mode fail.");
 			ret = _process_oneway_data(rsp, &conn_ops->oneway_ops, last_in_rxq, conn->usr_ops_ctx);
+			ret = set_connection_mode(conn, ARPC_CON_MODE_DIRE_IO);
+			LOG_ERROR_IF_VAL_TRUE(ret, "set_connection_rx_mode fail.");
 			break;
 		default:
 			break;
