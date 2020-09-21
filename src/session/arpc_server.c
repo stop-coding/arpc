@@ -61,13 +61,14 @@ static int server_session_event(struct xio_session *session, struct xio_session_
 			con->server.work = work;
 			memset(&attr, 0, sizeof(struct xio_connection_attr));
 			attr.user_context = con;
-			ARPC_LOG_NOTICE("##### new connection usr_ctx:%p.", event_data->conn);
+			ARPC_LOG_NOTICE("##### new connection[%p] create success.", con);
 			xio_modify_connection(event_data->conn, &attr, XIO_CONNECTION_ATTR_USER_CTX);
 			break;
 		case XIO_SESSION_CONNECTION_TEARDOWN_EVENT:
 			xio_connection_destroy(event_data->conn);
 			if(event_data->conn_user_context){
 				con = (struct arpc_connection *)event_data->conn_user_context;
+				ARPC_LOG_NOTICE("##### connection[%p] teardown.", con);
 				ret = session_remove_con(session_fd, con);
 				LOG_ERROR_IF_VAL_TRUE(ret, "session_remove_con fail.");
 				ret = arpc_destroy_con(con);
@@ -76,6 +77,7 @@ static int server_session_event(struct xio_session *session, struct xio_session_
 			break;
 		case XIO_SESSION_TEARDOWN_EVENT:
 			xio_session_destroy(session);
+			ARPC_LOG_NOTICE("##### session[%p] teardown.", session_fd);
 			session_ctx = (struct arpc_new_session_ctx *)session_fd->ex_ctx;
 			ret = server_remove_session(session_ctx->server, session_fd);
 			LOG_ERROR_IF_VAL_TRUE(ret, "server_insert_session fail.");
@@ -85,7 +87,7 @@ static int server_session_event(struct xio_session *session, struct xio_session_
 															session_fd->usr_context);
 				LOG_ERROR_IF_VAL_TRUE(ret, "user session_teardown fail.");
 			}
-			ret = arpc_destroy_session(session_fd);
+			ret = arpc_destroy_session(session_fd, 0);
 			LOG_ERROR_IF_VAL_TRUE(ret, "arpc_destroy_session fail.");
 			break;
 		case XIO_SESSION_ERROR_EVENT:
@@ -187,11 +189,11 @@ static int server_on_new_session(struct xio_session *session,struct xio_new_sess
 	ret = server_insert_session(server_fd, new_session);
 	LOG_ERROR_IF_VAL_TRUE(ret, "server_insert_session fail.");
 	server_fd->new_session_end((arpc_session_handle_t)new_session, &param, server_fd->usr_context);
-	ARPC_LOG_NOTICE("create new session[%p] success.", server_fd);
+	ARPC_LOG_NOTICE("create new session[%p] success, client[%s:%u].", server_fd, ipv4->ipv4.ip, ipv4->ipv4.port);
 	return 0;
 reject:
 	if(new_session)
-		arpc_destroy_session(new_session);
+		arpc_destroy_session(new_session, 0);
 	new_session = NULL;
 	xio_reject(session, XIO_E_SESSION_ABORTED, param.rsp_data, param.rsp_data_len); // 拒绝session请求
 	server_fd->new_session_end(NULL, &param, server_fd->usr_context);
@@ -205,7 +207,7 @@ static int _msg_error(struct xio_session *session,
 			    void *conn_user_context)
 {
 	SESSION_CONN_CTX(conn, conn_user_context);
-	ARPC_LOG_ERROR("msg_error message,dir:%d, err:%d. ", dir, error);
+	ARPC_LOG_ERROR("#### msg_error message, dir:%d, err:%d. ", dir, error);
 	switch(dir) {
 		case XIO_MSG_DIRECTION_OUT:
 			if(rsp->type == XIO_MSG_TYPE_REQ) {

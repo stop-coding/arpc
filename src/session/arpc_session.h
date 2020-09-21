@@ -102,7 +102,6 @@ struct arpc_session_handle{
 	QUEUE     q_con;
 	uint32_t 	conn_num;
 	void 		*threadpool;
-	struct arpc_mutex  lock;
 	enum session_type type;
 	struct xio_session *xio_s;
 	uint32_t 	is_close;
@@ -159,11 +158,11 @@ int  arpc_disconnection(struct arpc_connection *con);
 int  arpc_wait_connected(struct arpc_connection *con, uint64_t timeout_ms);
 
 struct arpc_session_handle *arpc_create_session(enum session_type type, uint32_t ex_ctx_size);
-int arpc_destroy_session(struct arpc_session_handle* session);
+int arpc_destroy_session(struct arpc_session_handle* session, int64_t timeout_ms);
 
 int session_insert_con(struct arpc_session_handle *s, struct arpc_connection *con);
 int session_remove_con(struct arpc_session_handle *s, struct arpc_connection *con);
-int get_connection(struct arpc_session_handle *s, struct arpc_connection **con, uint8_t is_crl);
+int get_connection(struct arpc_session_handle *s, struct arpc_connection **con, uint8_t is_crl, int64_t timeout_ms);
 int put_connection(struct arpc_session_handle *s, struct arpc_connection *con);
 int set_connection_mode(struct arpc_connection *con, enum arpc_connection_mode conn_mode);
 

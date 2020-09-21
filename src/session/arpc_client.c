@@ -62,18 +62,17 @@ static int session_event(struct xio_session *session,
 	switch (event_data->event) {
 		case XIO_SESSION_TEARDOWN_EVENT:
 			xio_session_destroy(session);
-			arpc_mutex_lock(&session_ctx->lock);
+			arpc_cond_lock(&session_ctx->cond);
 			if (session_ctx->is_close) {
 				ARPC_LOG_NOTICE(" user to tear down session.");
-				arpc_mutex_unlock(&session_ctx->lock);
-				arpc_cond_lock(&session_ctx->cond);
 				arpc_cond_notify_all(&session_ctx->cond);
 				arpc_cond_unlock(&session_ctx->cond);
 				break;
 			}
-			arpc_mutex_unlock(&session_ctx->lock);
-			rebuild_session(session_ctx);
+			arpc_cond_unlock(&session_ctx->cond);
 			ARPC_LOG_NOTICE(" rebuild session!!!!!!!!!!.");
+			ret = rebuild_session(session_ctx);
+			LOG_ERROR_IF_VAL_TRUE(ret, "rebuild_session fail.");
 			break;
 		case XIO_SESSION_CONNECTION_ESTABLISHED_EVENT:
 			arpc_cond_lock(&con_ctx->cond);
@@ -310,7 +309,7 @@ arpc_session_handle_t arpc_client_create_session(const struct arpc_client_sessio
 error_2:
 	SAFE_FREE_MEM(client_ctx->private_data);
 error_1:
-	arpc_destroy_session(session);
+	arpc_destroy_session(session, 60*1000);
 	ARPC_LOG_ERROR( "create session fail, exit.");
 	return NULL;
 }
@@ -322,7 +321,7 @@ int arpc_client_destroy_session(arpc_session_handle_t *fd)
 	LOG_THEN_RETURN_VAL_IF_TRUE(!fd, -1, "client session handle is null fail.");
 
 	session = (struct arpc_session_handle *)(*fd);
-	ret = arpc_destroy_session(session);
+	ret = arpc_destroy_session(session, 60*1000);//todo
 	LOG_THEN_RETURN_VAL_IF_TRUE(ret, -1, "arpc_destroy_session[%p] fail.", session);
 	ARPC_LOG_NOTICE( "destroy session[%p] success.", session);
 	*fd = NULL;

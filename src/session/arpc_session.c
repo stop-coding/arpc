@@ -62,11 +62,9 @@ struct arpc_session_handle *arpc_create_session(enum session_type type, uint32_t
 		return NULL;
 	}
 	memset(session, 0, sizeof(struct arpc_session_handle) + ex_ctx_size);
-	ret = arpc_mutex_init(&session->lock); /* 初始化互斥锁 */
-	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, free_buf, "arpc_mutex_init fail.");
 
-	ret = arpc_cond_init(&session->cond); /* 初始化互斥锁 */
-	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, free_mutex, "arpc_cond_init fail.");
+	ret = arpc_cond_init(&session->cond); /* 初始化信号锁 */
+	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, free_buf, "arpc_cond_init fail.");
 
 	QUEUE_INIT(&session->q);
 	QUEUE_INIT(&session->q_con);
@@ -74,35 +72,29 @@ struct arpc_session_handle *arpc_create_session(enum session_type type, uint32_t
 	session->type = type;
 	session->is_close = 0;
 	return session;
-free_mutex:
-	arpc_mutex_destroy(&session->lock);
+
 free_buf:
 	SAFE_FREE_MEM(session);
 	return NULL;
 }
 
-int arpc_destroy_session(struct arpc_session_handle* session)
+int arpc_destroy_session(struct arpc_session_handle* session, int64_t timeout_ms)
 {
 	int ret = 0;
 	QUEUE* q;
-	LOG_THEN_RETURN_VAL_IF_TRUE(!session, -1, "session null.");
 
-	ret = arpc_mutex_lock(&session->lock); /* 锁 */
+	LOG_THEN_RETURN_VAL_IF_TRUE(!session, -1, "session null.");
+	ret = arpc_cond_lock(&session->cond); /* 锁 */
 	LOG_ERROR_IF_VAL_TRUE(ret, "arpc_mutex_lock fail.");
 	session->is_close = 1;
-	ret = arpc_mutex_unlock(&session->lock); /* 开锁 */
-	LOG_ERROR_IF_VAL_TRUE(ret, "arpc_mutex_lock fail.");
 	
-	if(session->type == SESSION_CLIENT) {
-		arpc_cond_lock(&session->cond);
-	}
-	// 断开
 	q = NULL;
 	QUEUE_FOREACH_VAL(&session->q_con, q, dis_connection(q));
-
-	if(session->type == SESSION_CLIENT) {
-		arpc_cond_wait_timeout(&session->cond, 5*1000);
+	if (timeout_ms > 0){
+		ret = arpc_cond_wait_timeout(&session->cond, 10*1000);// todo
+		LOG_ERROR_IF_VAL_TRUE(ret, "wait session close signal time out, may coraump..., fixme.");
 	}
+
 	// 回收con资源
 	while(!QUEUE_EMPTY(&session->q_con)){
 		q = QUEUE_HEAD(&session->q_con);
@@ -110,15 +102,11 @@ int arpc_destroy_session(struct arpc_session_handle* session)
 		QUEUE_INIT(q);
 		destroy_connection_handle(q);
 	}
+	arpc_cond_unlock(&session->cond);
 
-	if(session->type == SESSION_CLIENT) {
-		arpc_cond_unlock(&session->cond);
-	}
 	ret = arpc_cond_destroy(&session->cond);
 	LOG_ERROR_IF_VAL_TRUE(ret, "arpc_cond_destroy fail.");
 
-	ret = arpc_mutex_destroy(&session->lock);
-	LOG_ERROR_IF_VAL_TRUE(ret, "arpc_mutex_unlock fail.");
 	SAFE_FREE_MEM(session);
 	return 0;
 }
@@ -126,27 +114,30 @@ int arpc_destroy_session(struct arpc_session_handle* session)
 int session_insert_con(struct arpc_session_handle *s, struct arpc_connection *con)
 {
 	int ret;
-	ret = arpc_mutex_lock(&s->lock);
+	ret = arpc_cond_lock(&s->cond);
 	LOG_THEN_RETURN_VAL_IF_TRUE(ret, -1, "arpc_mutex_lock session[%p] fail.", s);
 	QUEUE_INSERT_TAIL(&s->q_con, &con->q);
 	s->conn_num++;
-	arpc_mutex_unlock(&s->lock);
+	if (!con->is_busy) {
+		arpc_cond_notify(&s->cond);
+	}
+	arpc_cond_unlock(&s->cond);
 	return 0;
 }
 
 int session_remove_con(struct arpc_session_handle *s, struct arpc_connection *con)
 {
 	int ret;
-	ret = arpc_mutex_lock(&s->lock);
-	LOG_THEN_RETURN_VAL_IF_TRUE(ret, -1, "arpc_mutex_lock session[%p] fail.", s);
+	ret = arpc_cond_lock(&s->cond);
+	LOG_THEN_RETURN_VAL_IF_TRUE(ret, -1, "arpc_cond_lock session[%p] fail.", s);
 	QUEUE_REMOVE(&con->q);
 	QUEUE_INIT(&con->q);
 	s->conn_num--;
-	arpc_mutex_unlock(&s->lock);
+	arpc_cond_unlock(&s->cond);
 	return 0;
 }
 
-int get_connection(struct arpc_session_handle *s, struct arpc_connection **pcon, uint8_t is_crl)
+int get_connection(struct arpc_session_handle *s, struct arpc_connection **pcon, uint8_t is_crl, int64_t timeout_ms)
 {
 	int ret;
 	QUEUE* iter;
@@ -154,17 +145,19 @@ int get_connection(struct arpc_session_handle *s, struct arpc_connection **pcon,
 	struct timeval now;
 	LOG_THEN_RETURN_VAL_IF_TRUE(!pcon, ARPC_ERROR, "pcon is null.");
 
-	ret = arpc_mutex_lock(&s->lock);
+	ret = arpc_cond_lock(&s->cond);
 	LOG_THEN_RETURN_VAL_IF_TRUE(ret, ARPC_ERROR, "arpc_mutex_lock session[%p] fail.", s);
-	if(QUEUE_EMPTY(&s->q_con)){
-		arpc_mutex_unlock(&s->lock);
-		return -1;
+	if(QUEUE_EMPTY(&s->q_con) || s->is_close){
+		ARPC_LOG_ERROR("sesssion[%p] invalid, close status[%u]", s, s->is_close);
+		arpc_cond_unlock(&s->cond);
+		return ARPC_ERROR;
 	}
+
 	QUEUE_FOREACH_VAL(&s->q_con, iter,
 	{
 		con = QUEUE_DATA(iter, struct arpc_connection, q);
 		arpc_rwlock_wrlock(&con->rwlock);
-		ARPC_LOG_NOTICE("connection[%u][%p], status: %d|%d,dir:%d.",con->id, con->xio_con, con->is_busy, con->status, con->conn_mode);
+		ARPC_LOG_DEBUG("connection[%u][%p], status: busy:%d, sta:%d, dir:%d.",con->id, con->xio_con, con->is_busy, con->status, con->conn_mode);
 		if((!con->is_busy) && 
 			(con->status == XIO_STA_RUN_ACTION) && 
 			(con->conn_mode == ARPC_CON_MODE_DIRE_OUT || 
@@ -176,9 +169,14 @@ int get_connection(struct arpc_session_handle *s, struct arpc_connection **pcon,
 		arpc_rwlock_unlock(&con->rwlock);
 		con = NULL;
 	});
-	arpc_mutex_unlock(&s->lock);
+	
+	if(!con){
+		ARPC_LOG_NOTICE("warning: session[%p][con_num:%u] no idle connetion, wait...", s, s->conn_num);
+		ret = arpc_cond_wait_timeout(&s->cond, timeout_ms);
+		LOG_ERROR_IF_VAL_TRUE(ret, "wait idle connection timeout.");
+	}
 	*pcon = con;
-
+	arpc_cond_unlock(&s->cond);
 	//流控
 	if (con && is_crl) {
 		gettimeofday(&now, NULL);	// 线程安全
@@ -194,10 +192,7 @@ int get_connection(struct arpc_session_handle *s, struct arpc_connection **pcon,
 
 int set_connection_mode(struct arpc_connection *con, enum arpc_connection_mode	conn_mode)
 {
-	struct timeval now;
-	
 	LOG_THEN_RETURN_VAL_IF_TRUE(!con, ARPC_ERROR, "arpc_connection is null.");
-	gettimeofday(&now, NULL);
 	arpc_rwlock_wrlock(&con->rwlock);
 	con->conn_mode = conn_mode; // 输入模式
 	con->is_busy = 1;
@@ -212,18 +207,23 @@ int put_connection(struct arpc_session_handle *s, struct arpc_connection *con)
 
 	LOG_THEN_RETURN_VAL_IF_TRUE(!con, ARPC_ERROR, "con is null.");
 
-	ret = arpc_mutex_lock(&s->lock);
-	LOG_THEN_RETURN_VAL_IF_TRUE(ret, ARPC_ERROR, "arpc_mutex_lock session[%p] fail.", s);
-	if(QUEUE_EMPTY(&s->q_con)){
-		arpc_mutex_unlock(&s->lock);
-		return ARPC_ERROR;
-	}
+	ret = arpc_cond_lock(&s->cond);
+	LOG_THEN_RETURN_VAL_IF_TRUE(ret, ARPC_ERROR, "arpc_cond_lock session[%p] fail.", s);
+
 	QUEUE_REMOVE(&con->q);
 	QUEUE_INSERT_TAIL(&s->q_con, &con->q);
+
 	arpc_rwlock_wrlock(&con->rwlock);
 	con->is_busy = 0;
+	if((con->status == XIO_STA_RUN_ACTION) && 
+		(con->conn_mode == ARPC_CON_MODE_DIRE_OUT || 
+		con->conn_mode == ARPC_CON_MODE_DIRE_IO)) {
+		con->is_busy = 0;
+		arpc_cond_notify(&s->cond);
+	}
 	arpc_rwlock_unlock(&con->rwlock);
-	arpc_mutex_unlock(&s->lock);
+
+	arpc_cond_unlock(&s->cond);
 
 	return 0;
 }
@@ -724,7 +724,7 @@ static void destroy_session_handle(QUEUE* session_q)
 	session = QUEUE_DATA(session_q, struct arpc_session_handle, q);
 	LOG_THEN_RETURN_VAL_IF_TRUE(!session, ;, "session null.");
 
-	ret = arpc_destroy_session(session);
+	ret = arpc_destroy_session(session, 0);
 	LOG_THEN_RETURN_VAL_IF_TRUE(ret, ;, "arpc_destroy_session fail.");
 }
 

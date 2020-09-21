@@ -56,7 +56,7 @@ int arpc_do_request(const arpc_session_handle_t fd, struct arpc_msg *msg, int32_
 	LOG_THEN_RETURN_VAL_IF_TRUE((!session_ctx || !msg ), ARPC_ERROR, "arpc_session_handle_t fd null, exit.");
 
 	is_crl = (msg->send.total_data > IOV_DEFAULT_MAX_LEN)?1:0;
-	ret = get_connection(session_ctx, &con, is_crl);
+	ret = get_connection(session_ctx, &con, is_crl, 10*1000);
 	LOG_THEN_RETURN_VAL_IF_TRUE(!con, ARPC_ERROR, "not idle connection fail.");
 
 	pri_msg = (struct arpc_msg_data*)msg->handle;
@@ -152,11 +152,11 @@ int arpc_send_oneway_msg(const arpc_session_handle_t fd, struct arpc_vmsg *send,
 	LOG_THEN_RETURN_VAL_IF_TRUE((!session_ctx || !send ), ARPC_ERROR, "handle null, fail.");
 
 	is_crl = (send->total_data > 4*IOV_DEFAULT_MAX_LEN)?1:0;
-	ret = get_connection(session_ctx, &con, is_crl);
+	ret = get_connection(session_ctx, &con, is_crl, MAX_SEND_ONEWAY_END_TIME);
 	LOG_THEN_RETURN_VAL_IF_TRUE(!con, ARPC_ERROR, "not idle connection fail.");
 
 	poneway_msg = ARPC_MEM_ALLOC(sizeof(struct arpc_send_one_way_msg), NULL);
-	LOG_THEN_RETURN_VAL_IF_TRUE(!poneway_msg, ARPC_ERROR, "arpc_new_msg fail, exit.");
+	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!poneway_msg, put_con, "ARPC_MEM_ALLOC fail.");
 	memset(poneway_msg, 0, sizeof(struct arpc_send_one_way_msg));
 	
 	poneway_msg->clean_send = clean_send;
@@ -166,40 +166,48 @@ int arpc_send_oneway_msg(const arpc_session_handle_t fd, struct arpc_vmsg *send,
 	poneway_msg->need_free = 0;
 	// get msg
 	req = _arpc_create_xio_msg(&flags, poneway_msg->send, &poneway_msg->x_msg);
-	LOG_THEN_GOTO_TAG_IF_VAL_TRUE((req == NULL), unlock, "_arpc_convert_xio_msg fail.");
+	LOG_THEN_GOTO_TAG_IF_VAL_TRUE((req == NULL), put_con, "_arpc_convert_xio_msg fail.");
 	req->user_context = poneway_msg;
 	req->flags = 0;
 	req->flags |= XIO_MSG_FLAG_IMM_SEND_COMP; // 立马回复
 
+	ret = arpc_cond_init(&poneway_msg->cond);
+	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, put_con, "arpc_cond_init fail.");
+
+	ret = arpc_cond_lock(&poneway_msg->cond);
+	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, free_cond, "arpc_cond_lock fail.");
+
+	ret = xio_send_msg(con->xio_con, req);
+	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, free_cond, "xio_send_msg fail.");
+
+	ret = put_connection(session_ctx, con);
+	LOG_ERROR_IF_VAL_TRUE(ret, "put_connection fail.");
+
 	if(!poneway_msg->clean_send){
-		ret = arpc_cond_init(&poneway_msg->cond);
-		LOG_ERROR_IF_VAL_TRUE(ret, "put_connection fail.");
-		arpc_cond_lock(&poneway_msg->cond);
-
-		ret = xio_send_msg(con->xio_con, req);
-		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, unlock, "xio_send_msg fail.");
-
-		ARPC_LOG_DEBUG("send end onweway xio_con:[%u][%p].", con->id, con);
-
+		poneway_msg->need_free = 0;
 		ret = arpc_cond_wait_timeout(&poneway_msg->cond, MAX_SEND_ONEWAY_END_TIME);
 		LOG_ERROR_IF_VAL_TRUE(ret, "receive rsp msg fail for time out or system fail.");
-		if (ret) {
-			poneway_msg->need_free = 1;
-			arpc_cond_unlock(&poneway_msg->cond);
-		}else{
-			arpc_cond_unlock(&poneway_msg->cond);
-			arpc_cond_destroy(&poneway_msg->cond);
+		if (!ret) {
+			ret = arpc_cond_unlock(&poneway_msg->cond);
+			LOG_ERROR_IF_VAL_TRUE(ret, "arpc_cond_unlock fail.");
+			ret = arpc_cond_destroy(&poneway_msg->cond);
+			LOG_ERROR_IF_VAL_TRUE(ret, "arpc_cond_destroy fail.");
 			SAFE_FREE_MEM(poneway_msg);
-			ret = put_connection(session_ctx, con);
-			LOG_ERROR_IF_VAL_TRUE(ret, "put_connection fail.");
+		}else{
+			poneway_msg->need_free = 1;
+			ARPC_LOG_ERROR("receive rsp time out, set error free.");
+			arpc_cond_unlock(&poneway_msg->cond);
 		}
 	}else{
-		ret = xio_send_msg(con->xio_con, req);
 		poneway_msg->need_free = 1;
+		arpc_cond_unlock(&poneway_msg->cond);
 	}
-	
-	return ret;
-unlock:
+
+	return 0;
+free_cond:
+	arpc_cond_unlock(&poneway_msg->cond);
+	arpc_cond_destroy(&poneway_msg->cond);
+put_con:
 	ret = put_connection(session_ctx, con);
 	LOG_ERROR_IF_VAL_TRUE(ret, "put_connection fail.");
 	SAFE_FREE_MEM(poneway_msg);
@@ -214,12 +222,10 @@ unlock:
 int _oneway_send_complete(struct arpc_send_one_way_msg *oneway_msg, void *con_usr_ctx)
 {
 	struct arpc_connection *con = (struct arpc_connection *)oneway_msg->usr_ctx;
-	struct arpc_session_handle *session_ctx;
 	int ret;
 	LOG_THEN_RETURN_VAL_IF_TRUE(!oneway_msg, ARPC_ERROR, "oneway_msg null, fail.");
 	LOG_THEN_RETURN_VAL_IF_TRUE(!con, ARPC_ERROR, "con null, fail.");
 
-	session_ctx = (struct arpc_session_handle *)con->session;
 	if (!oneway_msg->need_free) {
 		ret =arpc_cond_lock(&oneway_msg->cond);
 		LOG_ERROR_IF_VAL_TRUE(ret, "arpc_cond_unlock fail.");
@@ -232,8 +238,6 @@ int _oneway_send_complete(struct arpc_send_one_way_msg *oneway_msg, void *con_us
 		if (oneway_msg->clean_send) {
 			oneway_msg->clean_send(oneway_msg->send, oneway_msg->send_ctx);
 		}
-		ret = put_connection(session_ctx, con);
-		LOG_ERROR_IF_VAL_TRUE(ret, "put_connection fail.");
 		SAFE_FREE_MEM(oneway_msg);
 	}
 
