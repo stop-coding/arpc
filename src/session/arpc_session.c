@@ -164,7 +164,7 @@ int get_connection(struct arpc_session_handle *s, struct arpc_connection **pcon,
 	{
 		con = QUEUE_DATA(iter, struct arpc_connection, q);
 		arpc_rwlock_wrlock(&con->rwlock);
-		ARPC_LOG_DEBUG("connection[%u][%p], status: %d|%d,dir:%d.",con->id, con->xio_con, con->is_busy, con->status, con->conn_mode);
+		ARPC_LOG_NOTICE("connection[%u][%p], status: %d|%d,dir:%d.",con->id, con->xio_con, con->is_busy, con->status, con->conn_mode);
 		if((!con->is_busy) && 
 			(con->status == XIO_STA_RUN_ACTION) && 
 			(con->conn_mode == ARPC_CON_MODE_DIRE_OUT || 

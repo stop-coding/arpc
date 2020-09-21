@@ -76,7 +76,6 @@ static int session_event(struct xio_session *session,
 			ARPC_LOG_NOTICE(" rebuild session!!!!!!!!!!.");
 			break;
 		case XIO_SESSION_CONNECTION_ESTABLISHED_EVENT:
-			ARPC_LOG_DEBUG(" build connection success!!!!!!!!!!.");
 			arpc_cond_lock(&con_ctx->cond);
 			if (event_data->conn != con_ctx->xio_con)
 				xio_connection_destroy(con_ctx->xio_con);
@@ -85,9 +84,11 @@ static int session_event(struct xio_session *session,
 			con_ctx->client.recon_interval_s = 0;
 			con_ctx->is_busy = 0;
 			arpc_cond_notify(&con_ctx->cond);
+			ARPC_LOG_NOTICE(" build connection[%u][%p] success!.", con_ctx->id, event_data->conn);
 			arpc_cond_unlock(&con_ctx->cond);
 			break;
 		case XIO_SESSION_CONNECTION_TEARDOWN_EVENT: // conn断开，需要释放con资源
+			ARPC_LOG_NOTICE("connection[%u][%p] tear down!.", con_ctx->id, event_data->conn);
 			arpc_cond_lock(&con_ctx->cond);
 			if (event_data->conn)
 				xio_connection_destroy(event_data->conn);
@@ -100,6 +101,15 @@ static int session_event(struct xio_session *session,
 			break;
 		case XIO_SESSION_REJECT_EVENT:
 		case XIO_SESSION_CONNECTION_REFUSED_EVENT: /**< connection refused event*/
+			arpc_cond_lock(&con_ctx->cond);
+			if (event_data->conn != con_ctx->xio_con)
+				xio_connection_destroy(con_ctx->xio_con);
+			con_ctx->status = XIO_STA_RUN;
+			con_ctx->client.recon_interval_s += 10;
+			con_ctx->is_busy = 1;
+			arpc_cond_notify(&con_ctx->cond);
+			ARPC_LOG_NOTICE(" build connection[%u][%p] refused!.", con_ctx->id, event_data->conn);
+			arpc_cond_unlock(&con_ctx->cond);
 			break;
 		case XIO_SESSION_ERROR_EVENT:
 			break;

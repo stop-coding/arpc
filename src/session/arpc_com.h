@@ -274,6 +274,7 @@ struct arpc_send_one_way_msg {
 	struct xio_msg				x_msg;
 	struct arpc_cond			cond;
 	void 						*usr_ctx;
+	uint8_t						need_free;
 };
 
 struct _async_proc_ops{
