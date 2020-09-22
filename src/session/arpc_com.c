@@ -341,16 +341,17 @@ int _create_header_source(struct xio_msg *msg, struct _proc_header_func *ops, ui
 	last_size = (last_size)? last_size :iov_max_len;
 	LOG_THEN_GOTO_TAG_IF_VAL_TRUE((!msg->in.data_tbl.sglist), error, "calloc fail.");
 
-	ARPC_LOG_DEBUG("get msg, nent:%u, iov_max_len:%lu, total_size:%lu", nents, iov_max_len, msg->in.total_data_len);
+	ARPC_LOG_NOTICE("get msg, nent:%u, iov_max_len:%lu, total_size:%lu, sglist:%p", nents, iov_max_len, msg->in.total_data_len, sglist);
 	for (i = 0; i < nents - 1; i++) {
 		sglist[i].iov_len = iov_max_len;
 		sglist[i].iov_base = ops->alloc_cb(sglist[i].iov_len, usr_ctx);
-		//ARPC_LOG_NOTICE("i:%u ,data:%p, len:%lu.",i, sglist[i].iov_base, sglist[i].iov_len);
+		memset(sglist[i].iov_base, 'h', sglist[i].iov_len);
+		ARPC_LOG_NOTICE("i:%u ,data:%p, len:%lu.",i, sglist[i].iov_base, sglist[i].iov_len);
 		LOG_THEN_GOTO_TAG_IF_VAL_TRUE((!sglist[i].iov_base), error_1, "calloc fail.");
 	}
 	sglist[i].iov_len = last_size;
 	sglist[i].iov_base = ops->alloc_cb(sglist[i].iov_len, usr_ctx);
-	ARPC_LOG_DEBUG("i:%u ,data:%p, len:%lu.",i, sglist[i].iov_base, sglist[i].iov_len);
+	ARPC_LOG_NOTICE("i:%u ,data:%p, len:%lu.",i, sglist[i].iov_base, sglist[i].iov_len);
 	// 出参
 	msg->in.data_tbl.sglist = (void*)sglist;
 	vmsg_sglist_set_nents(&msg->in, nents);

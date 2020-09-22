@@ -168,7 +168,6 @@ int arpc_send_oneway_msg(const arpc_session_handle_t fd, struct arpc_vmsg *send,
 	poneway_msg->clean_send = clean_send;
 	poneway_msg->send_ctx = send_ctx;
 	poneway_msg->send = send;
-
 	// get msg
 	flags = 0;
 	req = _arpc_create_xio_msg(&flags, poneway_msg->send, &poneway_msg->x_msg);

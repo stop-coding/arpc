@@ -1088,7 +1088,6 @@ int xio_tcp_xmit(struct xio_tcp_transport *tcp_hndl)
 
 			break;
 		case XIO_TCP_TX_IN_SEND_DATA:
-
 			for (i = 0; i < tcp_task->txd.msg.msg_iovlen; i++) {
 				tcp_hndl->tmp_work.msg_iov
 				[tcp_hndl->tmp_work.msg_len].iov_base =
@@ -1098,9 +1097,9 @@ int xio_tcp_xmit(struct xio_tcp_transport *tcp_hndl)
 					tcp_task->txd.msg.msg_iov[i].iov_len;
 				++tcp_hndl->tmp_work.msg_len;
 			}
+
 			tcp_hndl->tmp_work.tot_iov_byte_len +=
 					tcp_task->txd.tot_iov_byte_len;
-
 			++batch_count;
 			if (batch_count != batch_nr &&
 			    batch_count != tcp_hndl->tx_ready_tasks_num &&
@@ -2102,7 +2101,6 @@ int xio_tcp_recvmsg_work(struct xio_tcp_transport *tcp_hndl, int fd,
 				xio_recv->msg.msg_iovlen = 0;
 				break;
 			}
-
 			tmp_bytes = 0;
 			for (i = 0; i < xio_recv->msg.msg_iovlen; i++) {
 				if (xio_recv->msg.msg_iov[i].iov_len +
@@ -2117,9 +2115,10 @@ int xio_tcp_recvmsg_work(struct xio_tcp_transport *tcp_hndl, int fd,
 					  retval - tmp_bytes);
 					xio_recv->msg.msg_iov =
 						&xio_recv->msg.msg_iov[i];
+					
 					xio_recv->msg.msg_iovlen -= i;
 					break;
-				}
+				}	
 			}
 		} else if (retval == 0) {
 			xio_set_error(ECONNABORTED); /*so errno is not EAGAIN*/
@@ -2190,6 +2189,7 @@ void xio_tcp_dual_sock_set_rxd(struct xio_task *task,
 		tcp_task->rxd.msg.msg_iovlen = 0;
 	}
 }
+
 /*---------------------------------------------------------------------------*/
 /* xio_tcp_dual_sock_set_rxd						     */
 /*---------------------------------------------------------------------------*/
@@ -2199,25 +2199,20 @@ void xio_tcp_dual_sock_set_rxd_iov(struct xio_task *task,
 	struct iovec *ptr_iov = (struct iovec *)msg_iov;
 	uint32_t i = 0;
 	XIO_TO_TCP_TASK(task, tcp_task);
-	if(!ptr_iov || !msg_len || !total_len){
-		tcp_task->rxd.msg.msg_iovlen = 0;
-		tcp_task->rxd.tot_iov_byte_len = 0;
+	if(!ptr_iov || !msg_len){
 		return;
 	}
-	tcp_task->rxd.msg_iov[0].iov_base = ptr_iov[0].iov_base;
-	tcp_task->rxd.msg_iov[0].iov_len = ptr_iov[0].iov_len;
-	tcp_task->rxd.tot_iov_byte_len = total_len;
+
 	if (IS_APPLICATION_MSG(task->tlv_type)){
-		if (msg_len) {
-			for (i = 0;  i < msg_len; i++) {
-				tcp_task->rxd.msg_iov[i + 1].iov_base = ptr_iov[i].iov_base;
-				tcp_task->rxd.msg_iov[i + 1].iov_len = ptr_iov[i].iov_len;
-			}
-			tcp_task->rxd.msg_len = msg_len;
-			/* prepare the in side of the message */
-			tcp_task->rxd.msg.msg_iov = tcp_task->rxd.msg_iov;
-			tcp_task->rxd.msg.msg_iovlen = tcp_task->rxd.msg_len;
+		tcp_task->rxd.tot_iov_byte_len = total_len;
+		tcp_task->rxd.msg_len = msg_len;
+		for (i = 0;  i < msg_len; i++) {
+			tcp_task->rxd.msg_iov[i].iov_base = ptr_iov[i].iov_base;
+			tcp_task->rxd.msg_iov[i].iov_len = ptr_iov[i].iov_len;
 		}
+		/* prepare the in side of the message */
+		tcp_task->rxd.msg.msg_iov = tcp_task->rxd.msg_iov;
+		tcp_task->rxd.msg.msg_iovlen = tcp_task->rxd.msg_len;
 	}
 }
 
@@ -2448,6 +2443,7 @@ static int xio_tcp_on_recv_req_header(struct xio_tcp_transport *tcp_hndl,
 	case XIO_TCP_SEND: //TCP模式下
 		if (IS_APPLICATION_MSG(task->tlv_type)){
 			/* we already got the header with the XIO management */
+			tcp_hndl->sock.ops->set_rxd(task, ulp_hdr, (uint32_t)req_hdr.ulp_imm_len);
 			imsg->in.total_data_len = req_hdr.ulp_imm_len;
 			if(xio_tcp_alloc_data_buf(tcp_hndl, task)){
 				sgtbl = vmsg_base_sglist(&imsg->in);
@@ -2455,9 +2451,7 @@ static int xio_tcp_on_recv_req_header(struct xio_tcp_transport *tcp_hndl,
 				tcp_hndl->sock.ops->set_rxd_iov(task, sgtbl, inents, req_hdr.ulp_imm_len);
 				set_bits(XIO_MSG_HINT_USER_ALLOC_DATA_BUF, &imsg->hints);
 				break;
-			}else
-				tcp_hndl->sock.ops->set_rxd(task, ulp_hdr,
-					(uint32_t)req_hdr.ulp_imm_len);
+			}
 		}
 		else
 			// 协议消息，则内部分配内存处理
@@ -3271,7 +3265,6 @@ int xio_tcp_rx_data_handler(struct xio_tcp_transport *tcp_hndl, int batch_nr)
 	task = list_first_entry_or_null(&tcp_hndl->rx_list,
 					struct xio_task,
 					tasks_list_entry);
-
 	while (task && batch_count < batch_nr) {
 		tcp_task = (struct xio_tcp_task *)task->dd_data;
 		if (tcp_task->rxd.stage != XIO_TCP_RX_IO_DATA)
@@ -3305,6 +3298,7 @@ int xio_tcp_rx_data_handler(struct xio_tcp_transport *tcp_hndl, int batch_nr)
 				rxd_work->msg.msg_iov[i].iov_len;
 			++tcp_hndl->tmp_work.msg_len;
 		}
+		
 		tcp_hndl->tmp_work.tot_iov_byte_len +=
 				rxd_work->tot_iov_byte_len;
 
@@ -3319,13 +3313,13 @@ int xio_tcp_rx_data_handler(struct xio_tcp_transport *tcp_hndl, int batch_nr)
 
 		tcp_hndl->tmp_work.msg.msg_iov = tcp_hndl->tmp_work.msg_iov;
 		tcp_hndl->tmp_work.msg.msg_iovlen = tcp_hndl->tmp_work.msg_len;
-
+		
 		bytes_recv = tcp_hndl->tmp_work.tot_iov_byte_len;
 		recvmsg_retval = xio_tcp_recvmsg_work(tcp_hndl,
 						      tcp_hndl->sock.dfd,
 						      &tcp_hndl->tmp_work, 0);					  
 		bytes_recv -= tcp_hndl->tmp_work.tot_iov_byte_len;
-
+		
 		task = list_first_entry(&tcp_hndl->rx_list,
 					struct xio_task,  tasks_list_entry);
 		iov_len = tcp_hndl->tmp_work.msg_len -
@@ -3359,7 +3353,6 @@ int xio_tcp_rx_data_handler(struct xio_tcp_transport *tcp_hndl, int batch_nr)
 				tcp_hndl->tmp_work.msg.msg_iov[0].iov_base;
 			rxd_work->msg.msg_iov[0].iov_len =
 				tcp_hndl->tmp_work.msg.msg_iov[0].iov_len;
-
 			rxd_work->msg.msg_iovlen -= iov_len;
 			rxd_work->tot_iov_byte_len -= bytes_recv;
 		}
@@ -3367,16 +3360,16 @@ int xio_tcp_rx_data_handler(struct xio_tcp_transport *tcp_hndl, int batch_nr)
 		tcp_hndl->tmp_work.msg_len = 0;
 		tcp_hndl->tmp_work.tot_iov_byte_len = 0;
 
-                /* look for the maximum last in rxq index */
-                tmp_count = 0;
-                last_in_rxq = 0;
-                list_for_each_entry(task, &tcp_hndl->rx_list, tasks_list_entry) {
-                        if (IS_APPLICATION_MSG(task->tlv_type))
-                                last_in_rxq = (int)tmp_count;
-                        if (++tmp_count == (int)i)
-                                break;
-                }
-                tmp_count = 0;
+		/* look for the maximum last in rxq index */
+		tmp_count = 0;
+		last_in_rxq = 0;
+		list_for_each_entry(task, &tcp_hndl->rx_list, tasks_list_entry) {
+				if (IS_APPLICATION_MSG(task->tlv_type))
+						last_in_rxq = (int)tmp_count;
+				if (++tmp_count == (int)i)
+						break;
+		}
+		tmp_count = 0;
 
 		task = list_first_entry(&tcp_hndl->rx_list, struct xio_task,
 					tasks_list_entry);
