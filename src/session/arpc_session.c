@@ -30,6 +30,8 @@ static const uint32_t conn_magic = 0xff538770;
 #define ACCESS_CON_INTERVAL_TIME_US  (50*1000)
 #define IN_MODE_CON_INTERVAL_TIME_S  (10)
 
+#define MAX_TX_OW_MSG_LIMIT_NUM   100
+#define OW_MSG_TX_MAX_TIME_S   		120
 // client
 static struct arpc_connection *arpc_create_connection();
 static int arpc_destroy_connection(struct arpc_connection* con);
@@ -115,7 +117,7 @@ int session_insert_con(struct arpc_session_handle *s, struct arpc_connection *co
 {
 	int ret;
 	ret = arpc_cond_lock(&s->cond);
-	LOG_THEN_RETURN_VAL_IF_TRUE(ret, -1, "arpc_mutex_lock session[%p] fail.", s);
+	LOG_THEN_RETURN_VAL_IF_TRUE(ret, -1, "arpc_cond_lock session[%p] fail.", s);
 	QUEUE_INSERT_TAIL(&s->q_con, &con->q);
 	s->conn_num++;
 	if (!con->is_busy) {
@@ -153,38 +155,46 @@ int get_connection(struct arpc_session_handle *s, struct arpc_connection **pcon,
 		return ARPC_ERROR;
 	}
 
-	QUEUE_FOREACH_VAL(&s->q_con, iter,
-	{
-		con = QUEUE_DATA(iter, struct arpc_connection, q);
-		arpc_rwlock_wrlock(&con->rwlock);
-		ARPC_LOG_DEBUG("connection[%u][%p], status: busy:%d, sta:%d, dir:%d.",con->id, con->xio_con, con->is_busy, con->status, con->conn_mode);
-		if((!con->is_busy) && 
-			(con->status == XIO_STA_RUN_ACTION) && 
-			(con->conn_mode == ARPC_CON_MODE_DIRE_OUT || 
-			con->conn_mode == ARPC_CON_MODE_DIRE_IO)) {
-			con->is_busy = 1;
+	while(!con){
+		QUEUE_FOREACH_VAL(&s->q_con, iter,
+		{
+			con = QUEUE_DATA(iter, struct arpc_connection, q);
+			arpc_rwlock_wrlock(&con->rwlock);
+			ARPC_LOG_DEBUG("connection[%u][%p], status: busy:%d, sta:%d, dir:%d.",con->id, con->xio_con, con->is_busy, con->status, con->conn_mode);
+			if((!con->is_busy) && 
+				(con->status == XIO_STA_RUN_ACTION) && 
+				(con->conn_mode == ARPC_CON_MODE_DIRE_OUT || 
+				con->conn_mode == ARPC_CON_MODE_DIRE_IO)) {
+				con->is_busy = 1;
+				arpc_rwlock_unlock(&con->rwlock);
+				break;
+			}
 			arpc_rwlock_unlock(&con->rwlock);
+			con = NULL;
+		});
+		
+		if(con){break;}
+		ARPC_LOG_NOTICE("warning: session[%p][con_num:%u] no idle connetion, wait[%ld ms]...", s, s->conn_num, timeout_ms);
+		ret = arpc_cond_wait_timeout(&s->cond, timeout_ms);
+		if (ret) {
+			ARPC_LOG_ERROR("session[%p] wait idle connection timeout[%ld ms].", s, timeout_ms);
 			break;
 		}
-		arpc_rwlock_unlock(&con->rwlock);
-		con = NULL;
-	});
-	
-	if(!con){
-		ARPC_LOG_NOTICE("warning: session[%p][con_num:%u] no idle connetion, wait...", s, s->conn_num);
-		ret = arpc_cond_wait_timeout(&s->cond, timeout_ms);
-		LOG_ERROR_IF_VAL_TRUE(ret, "wait idle connection timeout.");
 	}
 	*pcon = con;
 	arpc_cond_unlock(&s->cond);
 	//流控
 	if (con && is_crl) {
 		gettimeofday(&now, NULL);	// 线程安全
+		arpc_rwlock_wrlock(&con->rwlock);
 		if((now.tv_usec < con->access_time.tv_usec + ACCESS_CON_INTERVAL_TIME_US) && (con->access_time.tv_sec == now.tv_sec)){
 			ARPC_LOG_NOTICE("warning: send overload, wait time [%d] ms.", ACCESS_CON_INTERVAL_TIME_US/1000);
+			arpc_rwlock_unlock(&con->rwlock);
 			arpc_usleep(ACCESS_CON_INTERVAL_TIME_US);
+			arpc_rwlock_wrlock(&con->rwlock);
 		}
 		con->access_time = now;
+		arpc_rwlock_unlock(&con->rwlock);
 	}
 
 	return (con)?0:-1;
@@ -207,22 +217,16 @@ int put_connection(struct arpc_session_handle *s, struct arpc_connection *con)
 
 	LOG_THEN_RETURN_VAL_IF_TRUE(!con, ARPC_ERROR, "con is null.");
 
+	arpc_rwlock_wrlock(&con->rwlock);
+	con->is_busy = 0;
+	arpc_rwlock_unlock(&con->rwlock);
+
 	ret = arpc_cond_lock(&s->cond);
 	LOG_THEN_RETURN_VAL_IF_TRUE(ret, ARPC_ERROR, "arpc_cond_lock session[%p] fail.", s);
 
 	QUEUE_REMOVE(&con->q);
 	QUEUE_INSERT_TAIL(&s->q_con, &con->q);
-
-	arpc_rwlock_wrlock(&con->rwlock);
-	con->is_busy = 0;
-	if((con->status == XIO_STA_RUN_ACTION) && 
-		(con->conn_mode == ARPC_CON_MODE_DIRE_OUT || 
-		con->conn_mode == ARPC_CON_MODE_DIRE_IO)) {
-		con->is_busy = 0;
-		arpc_cond_notify(&s->cond);
-	}
-	arpc_rwlock_unlock(&con->rwlock);
-
+	arpc_cond_notify(&s->cond);
 	arpc_cond_unlock(&s->cond);
 
 	return 0;
@@ -592,6 +596,7 @@ static struct arpc_connection *arpc_create_connection()
 	ret = arpc_rwlock_init(&con->rwlock); 
 	LOG_THEN_RETURN_VAL_IF_TRUE(ret, NULL, "arpc_rwlock_init fail.");
 	QUEUE_INIT(&con->q);
+	QUEUE_INIT(&con->q_ow_msg);
 	con->is_busy = 1;
 	con->magic = conn_magic;
 	gettimeofday(&now, NULL);	// 线程安全
@@ -731,6 +736,7 @@ static void destroy_session_handle(QUEUE* session_q)
 static int arpc_destroy_work(struct arpc_work_handle* work)
 {
 	int ret = 0;
+	LOG_THEN_RETURN_VAL_IF_TRUE(!work, ARPC_ERROR, "work null.");
 	ret = arpc_cond_destroy(&work->cond); 
 	LOG_THEN_RETURN_VAL_IF_TRUE(ret, ARPC_ERROR, "arpc_cond_destroy fail.");
 	SAFE_FREE_MEM(work);
@@ -779,4 +785,176 @@ static void xio_server_work_stop(void * ctx)
 	if(work->work_ctx)
 		xio_context_stop_loop(work->work_ctx);
 	return;
+}
+
+static struct arpc_conn_ow_msg *arpc_create_owmsg()
+{
+	int ret = 0;
+	struct arpc_conn_ow_msg *owmsg = NULL;
+	
+	/* handle*/
+	owmsg = (struct arpc_conn_ow_msg *)ARPC_MEM_ALLOC(sizeof(struct arpc_conn_ow_msg), NULL);
+	if (!owmsg) {
+		ARPC_LOG_ERROR( "malloc error, exit ");
+		return NULL;
+	}
+	memset(owmsg, 0, sizeof(struct arpc_conn_ow_msg));
+
+	ret = arpc_cond_init(&owmsg->cond); 
+	LOG_THEN_RETURN_VAL_IF_TRUE(ret, NULL, "arpc_cond_init fail.");
+	QUEUE_INIT(&owmsg->q);
+	owmsg->magic = ONE_WAY_MSG_MAGIC;
+	owmsg->is_idle = 1;
+	return owmsg;
+}
+
+static int arpc_destroy_owmsg(struct arpc_conn_ow_msg* owmsg)
+{
+	int ret = 0;
+	LOG_THEN_RETURN_VAL_IF_TRUE(!owmsg, ARPC_ERROR, "owmsg null.");
+	
+	ret = arpc_cond_lock(&owmsg->cond);
+	LOG_THEN_RETURN_VAL_IF_TRUE(ret, ARPC_ERROR, "arpc_cond_lock oneway msg fail.");
+	if (owmsg->is_idle && owmsg->clean_send) {
+		owmsg->clean_send(owmsg->send, owmsg->send_ctx);
+	}
+	owmsg->is_idle = 0;
+	owmsg->clean_send = 0;
+
+	arpc_cond_unlock(&owmsg->cond);
+	ret = arpc_cond_destroy(&owmsg->cond); 
+	LOG_THEN_RETURN_VAL_IF_TRUE(ret, ARPC_ERROR, "arpc_cond_destroy fail.");
+	SAFE_FREE_MEM(owmsg);
+	return 0;
+}
+
+static int conn_destroy_owmsg(struct arpc_connection *conn)
+{
+	int ret;
+	QUEUE* iter;
+	struct arpc_conn_ow_msg* owmsg;
+
+	ret = arpc_cond_lock(&conn->cond);
+	QUEUE_FOREACH_VAL(&conn->q_ow_msg, iter, 
+	{
+		owmsg = QUEUE_DATA(iter, struct arpc_conn_ow_msg, q);
+		ret = arpc_destroy_owmsg(owmsg);
+		LOG_ERROR_IF_VAL_TRUE(ret, "arpc_destroy_owmsg[%p] fail", owmsg);
+	});
+
+	arpc_cond_unlock(&conn->cond);
+	return 0;
+}
+
+int conn_put_owmsg(struct arpc_connection *conn, struct arpc_conn_ow_msg *owmsg)
+{
+	int ret;
+	QUEUE* iter;
+	LOG_THEN_RETURN_VAL_IF_TRUE(!conn, ARPC_ERROR, "arpc_connection null.");
+	LOG_THEN_RETURN_VAL_IF_TRUE(!owmsg, ARPC_ERROR, "arpc_conn_ow_msg null.");
+
+	LOG_THEN_RETURN_VAL_IF_TRUE(owmsg->magic != ONE_WAY_MSG_MAGIC, ARPC_ERROR, 
+		"magic[0x%x] not match[0x%x].",owmsg->magic, ONE_WAY_MSG_MAGIC);
+
+	ret = arpc_cond_lock(&conn->cond);
+	LOG_THEN_RETURN_VAL_IF_TRUE(ret, -1, "arpc_cond_lock conn[%p] fail.", conn);
+
+	QUEUE_FOREACH_VAL(&conn->q_ow_msg, iter, 
+	{
+		if ((const QUEUE *)iter == (const QUEUE *)&owmsg->q) {
+			conn->ow_msg_num--;
+			ret = 1;
+			break;
+		}
+	});
+	if (ret) {
+		arpc_cond_lock(&owmsg->cond);
+		owmsg->is_idle = 1;
+		if (owmsg->clean_send) {
+			owmsg->clean_send(owmsg->send, owmsg->send_ctx);
+		}
+		owmsg->clean_send = NULL;
+		owmsg->send_ctx = NULL;
+		owmsg->send = NULL;
+		arpc_cond_unlock(&owmsg->cond);
+	}
+	arpc_cond_notify(&conn->cond);
+	arpc_cond_unlock(&conn->cond);
+	
+	return 0;
+}
+
+int conn_get_owmsg(struct arpc_connection *conn, struct arpc_conn_ow_msg **powmsg, int64_t timeout_ms)
+{
+	int ret;
+	QUEUE* iter;
+	struct arpc_conn_ow_msg *owmsg = NULL;
+	struct timeval now;
+	LOG_THEN_RETURN_VAL_IF_TRUE(!conn, ARPC_ERROR, "arpc_connection null.");
+	LOG_THEN_RETURN_VAL_IF_TRUE(!powmsg, ARPC_ERROR, "arpc_conn_ow_msg null.");
+
+	arpc_cond_lock(&conn->cond);
+	while(!owmsg){
+		if(QUEUE_EMPTY(&conn->q_ow_msg)){
+			owmsg = arpc_create_owmsg();
+			LOG_ERROR_IF_VAL_TRUE(owmsg, "arpc_create_owmsg fail.");
+			if(owmsg){
+				QUEUE_INSERT_TAIL(&conn->q_ow_msg, &owmsg->q);
+				conn->ow_msg_num++;
+			}
+			break;
+		}
+
+		iter = QUEUE_HEAD(&conn->q_ow_msg);
+		while((const QUEUE *) iter != (const QUEUE *) &conn->q_ow_msg){
+			QUEUE_REMOVE(iter);
+			owmsg = QUEUE_DATA(iter, struct arpc_conn_ow_msg, q);
+			if (owmsg->is_idle) {
+				owmsg->is_idle = 0;
+				QUEUE_INSERT_TAIL(&conn->q_ow_msg, &owmsg->q);
+				break;
+			}else{
+				if (owmsg->tx_time.tv_sec + OW_MSG_TX_MAX_TIME_S < now.tv_sec) {
+					ARPC_LOG_ERROR("one way tx message[%p] not free in timeout[%u], auto to free", owmsg, OW_MSG_TX_MAX_TIME_S);
+					if (owmsg->clean_send) {
+						owmsg->clean_send(owmsg->send, owmsg->send_ctx);
+					}
+					owmsg->clean_send = NULL;
+					owmsg->send_ctx = NULL;
+					owmsg->send = NULL;
+					owmsg->is_idle = 0;
+					QUEUE_INSERT_TAIL(&conn->q_ow_msg, &owmsg->q);
+					break;
+				}
+			}
+			iter = QUEUE_HEAD(&conn->q_ow_msg);
+			owmsg = NULL;
+		}
+
+		if (owmsg) {
+			break;
+		}
+
+		if(conn->ow_msg_num > MAX_TX_OW_MSG_LIMIT_NUM){
+			timeout_ms = (timeout_ms)?timeout_ms:1000;
+			ARPC_LOG_NOTICE("warning: conn[%p][:%u] msg over max limit[%u], wait[%ld ms]...", conn, conn->id, conn->ow_msg_num, timeout_ms);
+			ret = arpc_cond_wait_timeout(&conn->cond, timeout_ms);
+			if (ret) {
+				ARPC_LOG_ERROR("conn[%p][:%u] wait idle msg timeout.", conn, conn->id);
+				break;
+			}
+		}else{
+			owmsg = arpc_create_owmsg();
+			LOG_ERROR_IF_VAL_TRUE(owmsg, "arpc_create_owmsg fail.");
+			if(owmsg){
+				QUEUE_INSERT_TAIL(&conn->q_ow_msg, &owmsg->q);
+				conn->ow_msg_num++;
+			}
+			break;
+		}
+	}
+	*powmsg = owmsg;
+	arpc_cond_unlock(&conn->cond);
+
+	return (owmsg)?0:-1;
 }

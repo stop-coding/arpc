@@ -26,7 +26,7 @@
 
 #include "arpc_com.h"
 #include "threadpool.h"
-
+#include "arpc_make_request.h"
 
 int _process_oneway_header(struct xio_msg *msg, struct oneway_ops *ops, uint64_t iov_max_len, void *usr_ctx)
 {

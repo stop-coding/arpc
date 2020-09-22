@@ -90,11 +90,26 @@ struct arpc_connection {
 	uint8_t						is_busy;
 	struct timeval 				access_time;
 	enum arpc_connection_mode	conn_mode;
+	uint32_t					ow_msg_num;
+	QUEUE     					q_ow_msg;
 	union
 	{
 		struct arpc_con_client client;
 		struct arpc_con_server server;
 	};
+};
+
+struct arpc_conn_ow_msg {
+	QUEUE 						q;
+	uint32_t					magic;
+	struct arpc_cond 			cond;				
+	struct timeval 				tx_time;
+	clean_send_cb_t 			clean_send;
+	void 						*send_ctx;
+	struct arpc_vmsg 			*send;					/* 用户发送数据*/
+	struct xio_msg				x_msg;
+	struct arpc_connection		*conn;
+	uint32_t 					is_idle;
 };
 
 struct arpc_session_handle{
@@ -159,6 +174,7 @@ int  arpc_wait_connected(struct arpc_connection *con, uint64_t timeout_ms);
 
 struct arpc_session_handle *arpc_create_session(enum session_type type, uint32_t ex_ctx_size);
 int arpc_destroy_session(struct arpc_session_handle* session, int64_t timeout_ms);
+int rebuild_session(struct arpc_session_handle *ses);
 
 int session_insert_con(struct arpc_session_handle *s, struct arpc_connection *con);
 int session_remove_con(struct arpc_session_handle *s, struct arpc_connection *con);
@@ -166,7 +182,9 @@ int get_connection(struct arpc_session_handle *s, struct arpc_connection **con, 
 int put_connection(struct arpc_session_handle *s, struct arpc_connection *con);
 int set_connection_mode(struct arpc_connection *con, enum arpc_connection_mode conn_mode);
 
-int rebuild_session(struct arpc_session_handle *ses);
+#define ONE_WAY_MSG_MAGIC 0xff78555a
+int conn_put_owmsg(struct arpc_connection *conn, struct arpc_conn_ow_msg *owmsg);
+int conn_get_owmsg(struct arpc_connection *conn, struct arpc_conn_ow_msg **powmsg, int64_t timeout_ms);
 
 struct arpc_server_handle *arpc_create_server(uint32_t ex_ctx_size);
 int arpc_destroy_server(struct arpc_server_handle* svr);

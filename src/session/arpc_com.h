@@ -267,16 +267,6 @@ struct arpc_msg_data {
 	uint32_t 		 			flag;
 };
 
-struct arpc_send_one_way_msg {
-	clean_send_cb_t 			clean_send;
-	void 						*send_ctx;
-	struct arpc_vmsg 			*send;					/* 用户发送数据*/
-	struct xio_msg				x_msg;
-	struct arpc_cond			cond;
-	void 						*usr_ctx;
-	uint8_t						need_free;
-};
-
 struct _async_proc_ops{
 	void* (*alloc_cb)(uint32_t size, void* usr_context);
 	int (*free_cb)(void* buf_ptr, void* usr_context);
@@ -349,13 +339,6 @@ int _process_rsp_data(struct xio_msg *rsp, int last_in_rxq);
 // oneway
 int _process_oneway_header(struct xio_msg *msg, struct oneway_ops *ops, uint64_t iov_max_len, void *usr_ctx);
 int _process_oneway_data(struct xio_msg *req, struct oneway_ops *ops, int last_in_rxq, void *usr_ctx);
-
-// make request
-int _arpc_rev_request_head(struct xio_msg *in_rsp);
-int _arpc_rev_request_rsp(struct xio_msg *in_rsp);
-int _release_rsp_msg(struct arpc_msg *msg);
-int _request_send_complete(struct arpc_msg *msg);
-int _oneway_send_complete(struct arpc_send_one_way_msg *oneway_msg, void *con_usr_ctx);
 
 #ifdef __cplusplus
 }

@@ -20,7 +20,7 @@
 #include <sys/time.h>
 
 #include "arpc_com.h"
-
+#include "arpc_make_request.h"
 
 int _process_rsp_header(struct xio_msg *rsp, void *usr_ctx)
 {

@@ -22,6 +22,7 @@
 #include "base_log.h"
 #include "arpc_com.h"
 #include "arpc_session.h"
+#include "arpc_make_request.h"
 
 #ifdef 	_DEF_SESSION_CLIENT
 
@@ -215,7 +216,7 @@ static int _on_msg_delivered(struct xio_session *session,
 				int last_in_rxq,
 				void *conn_user_context)
 {
-	struct arpc_send_one_way_msg *poneway_msg = (struct arpc_send_one_way_msg *)msg->user_context;
+	struct arpc_conn_ow_msg *poneway_msg = (struct arpc_conn_ow_msg *)msg->user_context;
 	ARPC_LOG_DEBUG("************!!!!!!!!!_on_msg_delivered, msg type:%d", msg->type);
 	LOG_THEN_RETURN_VAL_IF_TRUE((!poneway_msg), -1, "poneway_msg is empty.");
 	return _oneway_send_complete(poneway_msg, conn_user_context);
@@ -223,9 +224,12 @@ static int _on_msg_delivered(struct xio_session *session,
 
 static int _ow_msg_send_complete(struct xio_session *session, struct xio_msg *msg, void *conn_user_context)
 {
-	struct arpc_send_one_way_msg *poneway_msg = (struct arpc_send_one_way_msg *)msg->user_context;
+	struct arpc_conn_ow_msg *poneway_msg = (struct arpc_conn_ow_msg *)msg->user_context;
+	SESSION_CONN_CTX(conn, conn_user_context);
+
 	LOG_THEN_RETURN_VAL_IF_TRUE((!poneway_msg), -1, "poneway_msg is empty.");
-	ARPC_LOG_DEBUG("************!!!!!!!!!_ow_msg_send_complete, msg type:%d", msg->type);
+
+	ARPC_LOG_NOTICE("_ow_msg_send_complete id:[%u], source addr[%p].", conn->id, poneway_msg);
 	return _oneway_send_complete(poneway_msg, conn_user_context);
 }
 

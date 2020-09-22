@@ -23,7 +23,7 @@
 #include <unistd.h>
 
 #include "arpc_com.h"
-
+#include "arpc_make_request.h"
 
 struct arpc_msg *arpc_new_msg(const struct arpc_msg_param *p)
 {
