@@ -139,15 +139,16 @@ static int msg_error(struct xio_session *session,
 	ARPC_LOG_ERROR("msg_error message,dir:%d, err:%d. ", dir, error);
 	switch(dir) {
 		case XIO_MSG_DIRECTION_OUT:
-			if(rsp->type == XIO_MSG_TYPE_REQ) {
-				_arpc_rev_request_rsp(rsp);
-			}else if(rsp->type == XIO_MSG_TYPE_ONE_WAY){
+			if(rsp->type == XIO_MSG_TYPE_ONE_WAY){
 				_ow_msg_send_complete(session, rsp, conn_user_context);
 			}else if(rsp->type == XIO_MSG_TYPE_RSP) {
 				_process_send_rsp_complete(rsp, conn_user_context);
 			}
 			break;
 		case XIO_MSG_DIRECTION_IN:
+			if(rsp->type == XIO_MSG_TYPE_REQ) {
+				_arpc_rev_request_rsp(rsp);
+			}
 			break; 
 		default:
 			break;

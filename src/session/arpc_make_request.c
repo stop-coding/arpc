@@ -175,8 +175,11 @@ int arpc_send_oneway_msg(const arpc_session_handle_t fd, struct arpc_vmsg *send,
 	LOG_THEN_GOTO_TAG_IF_VAL_TRUE((req == NULL), unlock_cond, "arpc convert xio msg fail.");
 	req->user_context = poneway_msg;
 	req->flags = 0;
-	req->flags |= XIO_MSG_FLAG_IMM_SEND_COMP; // 立马回复
-
+	
+	if(!poneway_msg->clean_send){
+		req->flags |= XIO_MSG_FLAG_IMM_SEND_COMP; // 立马回复
+	}
+	send_cnt = 0;
 send_retry:
 	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(send_cnt > 3, unlock_cond, "send_cnt[%u] is over max3 fail.", send_cnt);
 	send_cnt++;

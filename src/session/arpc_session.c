@@ -31,7 +31,7 @@ static const uint32_t conn_magic = 0xff538770;
 #define IN_MODE_CON_INTERVAL_TIME_S  (10)
 
 #define MAX_TX_OW_MSG_LIMIT_NUM   100
-#define OW_MSG_TX_MAX_TIME_S   		120
+#define OW_MSG_TX_MAX_TIME_S   	  300
 // client
 static struct arpc_connection *arpc_create_connection();
 static int arpc_destroy_connection(struct arpc_connection* con);
@@ -850,6 +850,7 @@ int conn_put_owmsg(struct arpc_connection *conn, struct arpc_conn_ow_msg *owmsg)
 {
 	int ret;
 	QUEUE* iter;
+	struct arpc_conn_ow_msg* iter_owmsg;
 	LOG_THEN_RETURN_VAL_IF_TRUE(!conn, ARPC_ERROR, "arpc_connection null.");
 	LOG_THEN_RETURN_VAL_IF_TRUE(!owmsg, ARPC_ERROR, "arpc_conn_ow_msg null.");
 
@@ -859,24 +860,28 @@ int conn_put_owmsg(struct arpc_connection *conn, struct arpc_conn_ow_msg *owmsg)
 	ret = arpc_cond_lock(&conn->cond);
 	LOG_THEN_RETURN_VAL_IF_TRUE(ret, -1, "arpc_cond_lock conn[%p] fail.", conn);
 
+	ret = ARPC_ERROR;
 	QUEUE_FOREACH_VAL(&conn->q_ow_msg, iter, 
 	{
-		if ((const QUEUE *)iter == (const QUEUE *)&owmsg->q) {
+		iter_owmsg = QUEUE_DATA(iter, struct arpc_conn_ow_msg, q);
+		if (owmsg == iter_owmsg) {
 			conn->ow_msg_num--;
-			ret = 1;
+			ret = 0;
 			break;
 		}
 	});
-	if (ret) {
+	if (!ret) {
 		arpc_cond_lock(&owmsg->cond);
 		owmsg->is_idle = 1;
 		if (owmsg->clean_send) {
 			owmsg->clean_send(owmsg->send, owmsg->send_ctx);
 		}
 		owmsg->clean_send = NULL;
-		owmsg->send_ctx = NULL;
 		owmsg->send = NULL;
+		arpc_cond_notify(&owmsg->cond);
 		arpc_cond_unlock(&owmsg->cond);
+	}else{
+		ARPC_LOG_ERROR("onw way msg not find on conn[%u][%p]", conn->id, conn);
 	}
 	arpc_cond_notify(&conn->cond);
 	arpc_cond_unlock(&conn->cond);
@@ -893,14 +898,16 @@ int conn_get_owmsg(struct arpc_connection *conn, struct arpc_conn_ow_msg **powms
 	LOG_THEN_RETURN_VAL_IF_TRUE(!conn, ARPC_ERROR, "arpc_connection null.");
 	LOG_THEN_RETURN_VAL_IF_TRUE(!powmsg, ARPC_ERROR, "arpc_conn_ow_msg null.");
 
+	gettimeofday(&now, NULL);	// 线程安全
 	arpc_cond_lock(&conn->cond);
 	while(!owmsg){
 		if(QUEUE_EMPTY(&conn->q_ow_msg)){
 			owmsg = arpc_create_owmsg();
-			LOG_ERROR_IF_VAL_TRUE(owmsg, "arpc_create_owmsg fail.");
+			LOG_ERROR_IF_VAL_TRUE(!owmsg, "arpc_create_owmsg fail.");
 			if(owmsg){
 				QUEUE_INSERT_TAIL(&conn->q_ow_msg, &owmsg->q);
 				conn->ow_msg_num++;
+				owmsg->tx_time = now;
 			}
 			break;
 		}
@@ -908,10 +915,13 @@ int conn_get_owmsg(struct arpc_connection *conn, struct arpc_conn_ow_msg **powms
 		iter = QUEUE_HEAD(&conn->q_ow_msg);
 		while((const QUEUE *) iter != (const QUEUE *) &conn->q_ow_msg){
 			QUEUE_REMOVE(iter);
+			QUEUE_INSERT_TAIL(&conn->q_ow_msg, iter);
 			owmsg = QUEUE_DATA(iter, struct arpc_conn_ow_msg, q);
+			arpc_cond_lock(&owmsg->cond);
 			if (owmsg->is_idle) {
 				owmsg->is_idle = 0;
-				QUEUE_INSERT_TAIL(&conn->q_ow_msg, &owmsg->q);
+				owmsg->tx_time = now;
+				arpc_cond_unlock(&owmsg->cond);
 				break;
 			}else{
 				if (owmsg->tx_time.tv_sec + OW_MSG_TX_MAX_TIME_S < now.tv_sec) {
@@ -923,10 +933,12 @@ int conn_get_owmsg(struct arpc_connection *conn, struct arpc_conn_ow_msg **powms
 					owmsg->send_ctx = NULL;
 					owmsg->send = NULL;
 					owmsg->is_idle = 0;
-					QUEUE_INSERT_TAIL(&conn->q_ow_msg, &owmsg->q);
+					owmsg->tx_time = now;
+					arpc_cond_unlock(&owmsg->cond);
 					break;
 				}
 			}
+			arpc_cond_unlock(&owmsg->cond);
 			iter = QUEUE_HEAD(&conn->q_ow_msg);
 			owmsg = NULL;
 		}
@@ -949,6 +961,7 @@ int conn_get_owmsg(struct arpc_connection *conn, struct arpc_conn_ow_msg **powms
 			if(owmsg){
 				QUEUE_INSERT_TAIL(&conn->q_ow_msg, &owmsg->q);
 				conn->ow_msg_num++;
+				owmsg->tx_time = now;
 			}
 			break;
 		}
