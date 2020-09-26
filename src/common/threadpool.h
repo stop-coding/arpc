@@ -38,6 +38,7 @@ typedef void *tp_handle;
 struct tp_param {
 	uint32_t thread_max_num;			/* 线程池的线程数*/
 	uint32_t max_stack_size;		/* 线程栈空间大小*/
+	uint32_t cpu_max_num;
 	uint32_t flag;
 };
 

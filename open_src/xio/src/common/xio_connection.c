@@ -217,7 +217,7 @@ struct xio_connection *xio_connection_create(struct xio_session *session,
 		connection->rx_queue_watermark_bytes =
 					session->rcv_queue_depth_bytes / 2;
 		connection->enable_flow_control = g_options.enable_flow_control;
-
+		connection->tx_bytes = 0;
 		connection->conn_idx	= conn_idx;
 		connection->cb_user_context = cb_user_context;
 
@@ -312,10 +312,12 @@ int xio_connection_send(struct xio_connection *connection,
 		sgtbl	  = xio_sg_table_get(&msg->out);
 		sgtbl_ops = (struct xio_sg_table_ops *)
 				xio_sg_table_ops_get(msg->out.sgl_type);
-
-		tx_bytes  = msg->out.header.iov_len +
-			tbl_length(sgtbl_ops, sgtbl);
-
+		if(!sgtbl_ops){
+			ERROR_LOG("message out sgl_type:%d.\n", msg->out.sgl_type);
+			return -EAGAIN;
+		}
+		tx_bytes  = msg->out.header.iov_len + tbl_length(sgtbl_ops, sgtbl);
+		assert(tx_bytes <= 1025*1024);
 		/* message does not fit into remote queue */
 		if (connection->session->peer_rcv_queue_depth_bytes <
 		    tx_bytes) {
@@ -503,8 +505,12 @@ static int xio_connection_flush_msgs(struct xio_connection *connection)
 			tx_bytes  = pmsg->out.header.iov_len +
 				tbl_length(sgtbl_ops, sgtbl);
 
-			connection->tx_queued_msgs--;
-			connection->tx_bytes -= tx_bytes;
+			if (connection->tx_queued_msgs) 
+				connection->tx_queued_msgs--;
+			if(connection->tx_bytes > tx_bytes)
+				connection->tx_bytes -= tx_bytes;
+			else
+				connection->tx_bytes = 0;
 
 			if (connection->tx_queued_msgs < 0)
 				ERROR_LOG("tx_queued_msgs:%d\n",
@@ -1092,6 +1098,7 @@ int xio_send_request(struct xio_connection *connection,
 		pmsg->type = XIO_MSG_TYPE_REQ;
 
 		if (connection->enable_flow_control) {
+			assert(tx_bytes <= 1025*1024);
 			connection->tx_queued_msgs++;
 			connection->tx_bytes += tx_bytes;
 		}
@@ -1358,15 +1365,18 @@ static int xio_send_typed_msg(struct xio_connection *connection,
 		sgtbl		= xio_sg_table_get(&pmsg->out);
 		sgtbl_ops	= (struct xio_sg_table_ops *)
 				       xio_sg_table_ops_get(pmsg->out.sgl_type);
+		if(!sgtbl_ops) {
+			abort();
+		}
 		tx_bytes	= pmsg->out.header.iov_len + tbl_length(
 								    sgtbl_ops,
 								    sgtbl);
-
+		
 		if (unlikely(connection->tx_bytes + tx_bytes >
 		    connection->session->snd_queue_depth_bytes)) {
 			xio_set_error(XIO_E_TX_QUEUE_OVERFLOW);
-			ERROR_LOG("send queue overflow. queued:%lu bytes\n",
-				  connection->tx_bytes);
+			ERROR_LOG("send queue overflow. queued:%lu bytes, pmsg->out.sgl_type:%d\n",
+				  connection->tx_bytes, pmsg->out.sgl_type);
 			retval = -1;
 			goto send;
 		}
@@ -1567,7 +1577,7 @@ int xio_release_response(struct xio_msg *msg)
 		xio_ctx_debug_thread_lock(connection->ctx);
 #endif
 
-		if (connection->enable_flow_control) {
+		if (connection->enable_flow_control && 0) {
 			struct xio_vmsg		*vmsg;
 			struct xio_sg_table_ops	*sgtbl_ops;
 			void			*sgtbl;
@@ -1580,8 +1590,12 @@ int xio_release_response(struct xio_msg *msg)
 			bytes		= vmsg->header.iov_len +
 						tbl_length(sgtbl_ops, sgtbl);
 
-			connection->tx_queued_msgs--;
-			connection->tx_bytes -= bytes;
+			if (connection->tx_queued_msgs) 
+				connection->tx_queued_msgs--;
+			if(connection->tx_bytes > bytes)
+				connection->tx_bytes -= bytes;
+			else
+				connection->tx_bytes = 0;
 
 			vmsg		= &task->imsg.in;
 			sgtbl		= xio_sg_table_get(vmsg);

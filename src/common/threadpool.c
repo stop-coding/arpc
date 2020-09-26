@@ -79,6 +79,7 @@ struct _thread_pool_msg{
     uint32_t            thread_num;
     struct _thread_msg  *thread;
     uint32_t            idle_num;
+	uint32_t			cpu_max_num;
 	sem_t 				*sync;					/* 线程同步*/
 	char  				ext_data[0];				
 };
@@ -90,11 +91,17 @@ static void *task_worker(void* arg) {
 	QUEUE* q;
 	struct _work *to_run;
 	struct _thread_msg  *t_msg;
+	cpu_set_t		cpuset;
 	struct _thread_pool_msg* pool_ctx = (struct _thread_pool_msg*) arg;
 	LOG_THEN_RETURN_VAL_IF_TRUE((!pool_ctx), NULL, "pool_ctx empty fail.");
+
 	pthread_mutex_lock(&pool_ctx->mutex);
 	t_msg = &pool_ctx->thread[pool_ctx->idle_num];
 	t_msg->work_id = pool_ctx->idle_num;
+
+	CPU_ZERO(&cpuset);
+	CPU_SET((pool_ctx->thread_num)%(pool_ctx->cpu_max_num), &cpuset);
+	pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset);
 
 	TASK_SET_ACTIVE(t_msg->flag);
 	TP_LOG_DEBUG(" Eentry thread[%lu], init first.", t_msg->thread_id);
@@ -167,6 +174,9 @@ tp_handle tp_create_thread_pool(struct tp_param *p)
 	LOG_THEN_RETURN_VAL_IF_TRUE((!pool), NULL, "pool calloc fail.");
 
 	pool->thread_num = thread_num;
+	if (p){
+		pool->cpu_max_num = (p->cpu_max_num >= 4)?p->cpu_max_num:16;
+	}
 	pthread_mutex_init(&pool->mutex, NULL); /* 初始化互斥锁 */
 	pthread_cond_init(&pool->cond, NULL);	 /* 初始化条件变量 */
 
@@ -182,7 +192,7 @@ tp_handle tp_create_thread_pool(struct tp_param *p)
 		TP_LOG_ERROR("sem_init fail, to free pool.");
         goto error_2;
 	}
-
+	TP_LOG_NOTICE("create thread num:%u.", p->thread_max_num);
 	for (i = 0; i < p->thread_max_num; i++){
 		if (pthread_create(&pool->thread[i].thread_id, NULL, task_worker, pool) < 0) {
 			TP_LOG_ERROR("create thread fail, to free pool.");
@@ -190,7 +200,7 @@ tp_handle tp_create_thread_pool(struct tp_param *p)
 			goto error_3;
 		}
 		sem_wait(pool->sync);
-		TP_LOG_DEBUG("create thread[%lu] success, do next.", pool->thread[i].thread_id);
+		TP_LOG_NOTICE("create thread[%lu] success, do next.", pool->thread[i].thread_id);
 	}
 	if(pool->sync)
 		free(pool->sync);

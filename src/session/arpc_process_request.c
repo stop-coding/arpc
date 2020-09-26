@@ -20,35 +20,34 @@
 #include <string.h>
 #include <inttypes.h>
 #include <unistd.h>
-#include <errno.h>
-#include <sys/socket.h>
-#include <netdb.h>
 
 #include "arpc_com.h"
 #include "threadpool.h"
+#include "arpc_request.h"
+#include "arpc_response.h"
 
+static int request_msg_async_deal(void *usr_ctx);
 
-int _process_request_header(struct xio_msg *msg, struct request_ops *ops, uint64_t iov_max_len, void *usr_ctx)
+int process_request_header(struct arpc_connection *con, struct xio_msg *msg, struct request_ops *ops, uint64_t iov_max_len, void *usr_ctx)
 {
-	struct _proc_header_func head_ops;
+	struct proc_header_func head_ops;
 	head_ops.alloc_cb = ops->alloc_cb;
 	head_ops.free_cb = ops->free_cb;
 	head_ops.proc_head_cb = ops->proc_head_cb;
-	return _create_header_source(msg, &head_ops, iov_max_len, usr_ctx);
+	return create_xio_msg_usr_buf(msg, &head_ops, iov_max_len, usr_ctx);
 }
 
-int _process_request_data(struct xio_msg *req,
-			   struct request_ops *ops,
-		       int last_in_rxq,
-		       void *usr_ctx)
+int process_request_data(struct arpc_connection *con, struct xio_msg *req, struct request_ops *ops, int last_in_rxq, void *usr_ctx)
 {
 	struct xio_iovec	*sglist = vmsg_base_sglist(&req->in);
 	uint32_t			nents = vmsg_sglist_nents(&req->in);
 	uint32_t			i;
 	struct arpc_vmsg 	rev_iov;
-	struct arpc_rsp 	rsp;
-	struct _async_proc_ops async_ops;
-	int				ret;
+	struct arpc_rsp 	usr_rsp_param;
+	struct arpc_common_msg *rsp_hanlde;
+	struct arpc_rsp_handle	*rsp_fd_ex;
+	struct arpc_thread_param *async_param;
+	int					ret;
 
 	LOG_THEN_RETURN_VAL_IF_TRUE((!req), ARPC_ERROR, "req null.");
 
@@ -59,18 +58,26 @@ int _process_request_data(struct xio_msg *req,
 	rev_iov.vec = (struct arpc_iov *)sglist;
 	rev_iov.total_data = req->in.total_data_len;
 	
-	// 数据处理,并获得回复消息
-	memset(&rsp, 0, sizeof(struct arpc_rsp));
-	rsp.rsp_fd = (void *)req;
+	rsp_hanlde = arpc_create_common_msg(sizeof(struct arpc_rsp_handle));
+	LOG_THEN_RETURN_VAL_IF_TRUE(!rsp_hanlde, ARPC_ERROR, "rsp_hanlde alloc null.");
+	rsp_hanlde->conn = con;
+	rsp_fd_ex = (struct arpc_rsp_handle*)rsp_hanlde->ex_data;
+	rsp_fd_ex->x_rsp_msg = req;
+
+	memset(&usr_rsp_param, 0, sizeof(struct arpc_rsp));
+	usr_rsp_param.rsp_fd = (void *)rsp_hanlde;
 	if(IS_SET(req->usr_flags, METHOD_ARPC_PROC_SYNC) && ops->proc_data_cb){
-		ret = ops->proc_data_cb(&rev_iov, &rsp, usr_ctx);
+		ret = ops->proc_data_cb(&rev_iov, &usr_rsp_param, usr_ctx);
 		LOG_ERROR_IF_VAL_TRUE(ret, "proc_data_cb that define for user is error.");
-		if (!IS_SET(rsp.flags, METHOD_CALLER_HIJACK_RX_DATA)) {
-			_clean_header_source(req, ops->free_cb, usr_ctx);
+		if (!IS_SET(usr_rsp_param.flags, METHOD_CALLER_HIJACK_RX_DATA)) {
+			destroy_xio_msg_usr_buf(req, ops->free_cb, usr_ctx);
 		}
-		if (IS_SET(rsp.flags, METHOD_CALLER_ASYNC)) {
+		if (IS_SET(usr_rsp_param.flags, METHOD_CALLER_ASYNC)) {
 			goto end;
 		}else{
+			rsp_fd_ex->rsp_usr_iov = usr_rsp_param.rsp_iov;
+			rsp_fd_ex->rsp_usr_ctx = usr_rsp_param.rsp_ctx;
+			rsp_fd_ex->release_rsp_cb = ops->release_rsp_cb;
 			goto do_respone;
 		}
 	}else if(ops->free_cb && ops->proc_async_cb && ops->release_rsp_cb){
@@ -78,16 +85,27 @@ int _process_request_data(struct xio_msg *req,
 			ARPC_LOG_ERROR("caller don't alloc buf to rx data, can't proc async fail.");
 			goto free_user_buf;
 		}
-		async_ops.alloc_cb = ops->alloc_cb;
-		async_ops.free_cb = ops->free_cb;
-		async_ops.proc_async_cb = ops->proc_async_cb;
-		async_ops.release_rsp_cb = ops->release_rsp_cb;
-		async_ops.proc_oneway_async_cb = NULL;
-		ret = _post_iov_to_async_thread(&rev_iov, req, &async_ops, usr_ctx);
-		if(ret != ARPC_SUCCESS) {
-			ARPC_LOG_ERROR("_post_iov_to_async_thread fail.");
-			goto free_user_buf;
+		async_param = (struct arpc_thread_param * )ARPC_MEM_ALLOC(sizeof(struct arpc_thread_param), NULL);
+		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!async_param, free_user_buf, "async_param is null, can't do async.");
+		memset(async_param, 0, sizeof(struct arpc_thread_param));
+		async_param->ops.alloc_cb = ops->alloc_cb;
+		async_param->ops.free_cb = ops->free_cb;
+		async_param->ops.proc_async_cb = ops->proc_async_cb;
+		async_param->ops.release_rsp_cb = ops->release_rsp_cb;
+		async_param->ops.proc_oneway_async_cb = NULL;
+		async_param->rsp_ctx = rsp_hanlde;
+		async_param->rev_iov = rev_iov;
+		async_param->req_msg = req;
+		async_param->usr_ctx = usr_ctx;
+		async_param->loop = &request_msg_async_deal;
+		//deepcopy
+		if (rev_iov.head_len){
+			async_param->rev_iov.head = ARPC_MEM_ALLOC(rev_iov.head_len, NULL);
+			memcpy(async_param->rev_iov.head, rev_iov.head, rev_iov.head_len);
 		}
+
+		ret = post_to_async_thread(async_param);
+		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, free_user_buf, "post_to_async_thread fail, can't do async.");
 	}else{
 		ARPC_LOG_ERROR("unkown fail.");
 		goto free_user_buf;
@@ -95,39 +113,47 @@ int _process_request_data(struct xio_msg *req,
 end:
 	return 0;
 free_user_buf:
-	_clean_header_source(req, ops->free_cb, usr_ctx);
+	destroy_xio_msg_usr_buf(req, ops->free_cb, usr_ctx);
 
 do_respone:	
 	/* attach request to response */
-	return _do_respone(rsp.rsp_iov, req, ops->release_rsp_cb, usr_ctx);
+	return arpc_send_response(rsp_hanlde);
 }
 
-int _process_send_rsp_complete(struct xio_msg *rsp, void *usr_ctx)
+static int request_msg_async_deal(void *usr_ctx)
 {
-	struct _rsp_complete_ctx *rsp_ctx;
-	
-	LOG_THEN_RETURN_VAL_IF_TRUE((!rsp), ARPC_ERROR, "rsp or ops null.");
-	ARPC_LOG_DEBUG("rsp_send_complete, rsp:%p.", rsp);
-	rsp_ctx = (struct _rsp_complete_ctx *)rsp->user_context;
-	rsp->user_context =NULL;
+	struct arpc_thread_param *async = (struct arpc_thread_param *)usr_ctx;
+	struct arpc_rsp rsp;
+	int ret;
+	struct arpc_common_msg *rsp_fd;
+	struct arpc_rsp_handle	*rsp_fd_ex;
 
-	if(IS_SET(rsp->usr_flags, FLAG_RSP_USER_DATA) && rsp_ctx && rsp_ctx->release_rsp_cb){
-		rsp_ctx->release_rsp_cb(rsp_ctx->rsp_iov, rsp_ctx->rsp_usr_ctx); //释放用户申请的资源
+	ARPC_LOG_DEBUG("Note: msg deal on thread[%lu]...", pthread_self());// to do
+	LOG_THEN_RETURN_VAL_IF_TRUE(!async, ARPC_ERROR, "async null.");
+	LOG_THEN_RETURN_VAL_IF_TRUE(!async->ops.proc_async_cb, ARPC_ERROR, "request proc_async_cb null.");
+	LOG_THEN_RETURN_VAL_IF_TRUE(!async->rsp_ctx, ARPC_ERROR, "request rsp context is null.");
+
+	rsp_fd  = (struct arpc_common_msg *)async->rsp_ctx;
+	memset(&rsp, 0, sizeof (struct arpc_rsp));						
+	rsp.rsp_fd = (void*)rsp_fd;	
+
+	ret = async->ops.proc_async_cb(&async->rev_iov, &rsp, async->usr_ctx);
+	LOG_ERROR_IF_VAL_TRUE(ret, "proc_async_cb of request error.");
+	if (!IS_SET(rsp.flags, METHOD_CALLER_HIJACK_RX_DATA)) {
+		ret = destroy_xio_msg_usr_buf(async->req_msg, async->ops.free_cb, async->usr_ctx);
+		LOG_ERROR_IF_VAL_TRUE(ret, "proc_async_cb of request error.");
+		async->rev_iov.vec = NULL;
 	}
 
-	if (rsp_ctx) {
-		ARPC_MEM_FREE(rsp_ctx, NULL); // todo
-		rsp_ctx = NULL;
-
+	rsp_fd_ex = (struct arpc_rsp_handle*)rsp_fd->ex_data;
+	rsp_fd_ex->rsp_usr_iov = rsp.rsp_iov;
+	rsp_fd_ex->release_rsp_cb = async->ops.release_rsp_cb;
+	if (!IS_SET(rsp.flags, METHOD_CALLER_ASYNC)) {
+		ret = arpc_send_response(rsp_fd);
+		LOG_ERROR_IF_VAL_TRUE(ret, "arpc_do_respone fail.");
 	}
-
-	// 释放内部IOV申请的资源
-	if (rsp->out.pdata_iov.sglist) {
-		ARPC_MEM_FREE(rsp->out.pdata_iov.sglist, NULL); // todo
-		rsp->out.pdata_iov.sglist = NULL;
-	}
-	ARPC_MEM_FREE(rsp, NULL); // todo
+	SAFE_FREE_MEM(async->rev_iov.head);
+	SAFE_FREE_MEM(async);
 
 	return 0;
 }
-

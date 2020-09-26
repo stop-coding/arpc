@@ -35,7 +35,8 @@ typedef void* arpc_server_t;						/*! @brief server */
 #define _DEF_SESSION_CLIENT
 
 struct aprc_option{
-	uint32_t thread_max_num;	
+	uint32_t thread_max_num;	/*! @brief 最大工作线程数，同一个线程池管理 */
+	uint32_t  cpu_max_num;		/*! @brief cpu核心数，用于线程绑定 */
 };
 
 /*!
@@ -119,7 +120,9 @@ struct arpc_header_msg{
 
 enum arpc_vec_type {
 	ARPC_VEC_TYPE_PRT = 0,									/*! @brief 自定义指针，用户分配vec结构体 */
-	ARPC_VEC_TYPE_ARR										/*! @brief 数组，默认为ARPC_VEC_MAX_NUM定义的数量*/
+	ARPC_VEC_TYPE_ARR,										/*! @brief 数组，默认为ARPC_VEC_MAX_NUM定义的数量*/
+	ARPC_VEC_TYPE_INTER,									/*! @brief 内部vec指针*/
+	ARPC_VEC_TYPE_NONE,										/*! @brief 内部vec指针*/
 };
 /**
  * @brief  arpc基础消息结构
@@ -153,6 +156,7 @@ struct arpc_rsp{
 	uint32_t			flags;								/*! @brief 消息处理标记位,通过 SET_METHOD方法设置*/
 	struct arpc_vmsg 	*rsp_iov;							/*! @brief 由调用者填充的回复的数据 */
 	arpc_rsp_handle_t   rsp_fd;								/*! @brief 消息回复句柄，用于arpc_do_respone接口*/
+	void				*rsp_ctx;
 };
 
 /*! 
@@ -277,14 +281,16 @@ struct arpc_msg{
 	/*! @brief 待发送的数据， 异步发送，如果未设置clean_send_cb回调则会阻塞到发送完毕。*/
 	struct arpc_vmsg	send;
 
+	void 				*send_ctx;
 	/*! @brief 发送完毕后回调，用于清理发送的资源 */
-	int (*clean_send_cb)(struct arpc_vmsg *send, void* usr_ctx);
+	int (*clean_send_cb)(struct arpc_vmsg *send, void* send_ctx);
 
 	/*! @brief 待接受的消息数据， 消息框架会自动把send的对应的回复消息放置到这里 */
 	struct arpc_vmsg	receive;
 
+	void 				*receive_ctx;
 	/*! @brief 接收到回复消息后， 用于处理发送的数据 */
-	int (*proc_rsp_cb)(struct arpc_vmsg *rsp, void *usr_ctx);
+	int (*proc_rsp_cb)(struct arpc_vmsg *receive, void *receive_ctx);
 
 	/*! @brief 消息框架内部实例化私有数据，对调用者不可见 */
 	PRIVATE_HANDLE;

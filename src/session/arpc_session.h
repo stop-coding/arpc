@@ -27,6 +27,7 @@
 #include "base_log.h"
 #include "queue.h"
 #include "arpc_com.h"
+#include "arpc_message.h"
 
 #define SERVER_CTX(server_fd, usr_ctx)	\
 struct arpc_server_handle *server_fd = (struct arpc_server_handle *)usr_ctx;
@@ -41,6 +42,21 @@ struct arpc_connection *conn = (struct arpc_connection *)con_usr_ctx;
 struct arpc_connection *conn = (struct arpc_connection *)con_usr_ctx;\
 struct arpc_session_ops	*conn_ops;\
 do{if(conn){conn_ops = conn->ops;}else{ARPC_LOG_ERROR("conn ops is null");}}while(0);
+
+enum session_status{
+	SESSION_STA_INIT = 0, 	 //初始化完毕
+	SESSION_STA_RUN, 		//运行
+	SESSION_STA_RUN_ACTION, //活跃，指链路联通
+	SESSION_STA_WAIT,
+	SESSION_STA_CLEANUP, 	//释放
+};
+
+enum session_type{
+	SESSION_CLIENT = 0, //
+	SESSION_SERVER, 	//
+	SESSION_SERVER_CHILD, 	//
+	SESSION_NONE, 	//
+};
 
 enum xio_con_status{
 	XIO_STA_INIT = 0, 	 //初始化完毕
@@ -69,6 +85,13 @@ struct arpc_con_client {
 	work_handle_t 				thread_handle;
 };
 
+struct arpc_client_ctx {
+	struct xio_session_params	xio_param;
+	char 						uri[URI_MAX_LEN];
+	void						*private_data;  /**< private user data snt to */
+	uint64_t					private_data_len; /**< private data length    */
+};
+
 struct arpc_con_server {
 	struct arpc_work_handle     *work;
 	void						*work_ctx;
@@ -80,8 +103,7 @@ struct arpc_connection {
 	uint32_t					id;
 	struct xio_connection		*xio_con;				/* connection 资源*/
 	enum arpc_connection_type   type;
-	struct arpc_cond 			cond;
-	struct arpc_rwlock			rwlock;					
+	struct arpc_cond 			cond;				
 	enum xio_con_status			status;
 	struct arpc_session_handle  *session;
 	struct arpc_session_ops	    *ops;
@@ -89,9 +111,10 @@ struct arpc_connection {
 	uint32_t					flags;
 	uint8_t						is_busy;
 	struct timeval 				access_time;
+	uint32_t					aceess_cnt;
 	enum arpc_connection_mode	conn_mode;
-	uint32_t					ow_msg_num;
-	QUEUE     					q_ow_msg;
+	uint64_t					tx_msg_num;
+	QUEUE     					q_tx_msg;
 	union
 	{
 		struct arpc_con_client client;
@@ -99,23 +122,11 @@ struct arpc_connection {
 	};
 };
 
-struct arpc_conn_ow_msg {
-	QUEUE 						q;
-	uint32_t					magic;
-	struct arpc_cond 			cond;				
-	struct timeval 				tx_time;
-	clean_send_cb_t 			clean_send;
-	void 						*send_ctx;
-	struct arpc_vmsg 			*send;					/* 用户发送数据*/
-	struct xio_msg				x_msg;
-	struct arpc_connection		*conn;
-	uint32_t 					is_idle;
-};
-
 struct arpc_session_handle{
 	QUEUE     q;
 	QUEUE     q_con;
 	uint32_t 	conn_num;
+	uint64_t 	tx_total;
 	void 		*threadpool;
 	enum session_type type;
 	struct xio_session *xio_s;
@@ -178,13 +189,14 @@ int rebuild_session(struct arpc_session_handle *ses);
 
 int session_insert_con(struct arpc_session_handle *s, struct arpc_connection *con);
 int session_remove_con(struct arpc_session_handle *s, struct arpc_connection *con);
-int get_connection(struct arpc_session_handle *s, struct arpc_connection **con, uint8_t is_crl, int64_t timeout_ms);
-int put_connection(struct arpc_session_handle *s, struct arpc_connection *con);
+int get_connection(struct arpc_session_handle *s, struct arpc_connection **con, int64_t timeout_ms);
 int set_connection_mode(struct arpc_connection *con, enum arpc_connection_mode conn_mode);
 
-#define ONE_WAY_MSG_MAGIC 0xff78555a
-int conn_put_owmsg(struct arpc_connection *conn, struct arpc_conn_ow_msg *owmsg);
-int conn_get_owmsg(struct arpc_connection *conn, struct arpc_conn_ow_msg **powmsg, int64_t timeout_ms);
+#define COMM_MSG_MAGIC 0xff8766a
+int arpc_session_send_request(struct arpc_connection *conn, struct arpc_common_msg  *msg);
+int arpc_session_send_oneway(struct arpc_connection *conn, struct arpc_common_msg   *msg);
+int arpc_session_send_response(struct arpc_connection *conn, struct arpc_common_msg *msg);
+int arpc_session_send_complete(struct arpc_connection *conn);
 
 struct arpc_server_handle *arpc_create_server(uint32_t ex_ctx_size);
 int arpc_destroy_server(struct arpc_server_handle* svr);

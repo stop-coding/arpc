@@ -35,6 +35,7 @@
 extern "C" {
 #endif
 
+#define ARPC_TIME_OUT	-2
 #define ARPC_ERROR		-1
 #define ARPC_SUCCESS	0
 
@@ -100,6 +101,12 @@ inline static int arpc_mutex_lock(struct arpc_mutex *m)
 	return pthread_mutex_lock(&m->lock);
 }
 
+inline static int arpc_mutex_trylock(struct arpc_mutex *m)
+{
+	LOG_THEN_RETURN_VAL_IF_TRUE(!m->is_inited, ARPC_ERROR, "lock have not inited.");
+	return pthread_mutex_trylock(&m->lock);
+}
+
 inline static int arpc_mutex_unlock(struct arpc_mutex *m)
 {
 	LOG_THEN_RETURN_VAL_IF_TRUE(!m->is_inited, ARPC_ERROR, "lock have not inited.");
@@ -130,10 +137,22 @@ inline static int arpc_rwlock_rdlock(struct arpc_rwlock *rw)
 	return pthread_rwlock_rdlock(&rw->lock);
 }
 
+inline static int arpc_rwlock_tryrdlock(struct arpc_rwlock *rw)
+{
+	LOG_THEN_RETURN_VAL_IF_TRUE(!rw->is_inited, ARPC_ERROR, "rwlock have not inited.");
+	return pthread_rwlock_tryrdlock(&rw->lock);
+}
+
 inline static int arpc_rwlock_wrlock(struct arpc_rwlock *rw)
 {
 	LOG_THEN_RETURN_VAL_IF_TRUE(!rw->is_inited, ARPC_ERROR, "rwlock have not inited.");
 	return pthread_rwlock_wrlock(&rw->lock);
+}
+
+inline static int arpc_rwlock_trywrlock(struct arpc_rwlock *rw)
+{
+	LOG_THEN_RETURN_VAL_IF_TRUE(!rw->is_inited, ARPC_ERROR, "rwlock have not inited.");
+	return pthread_rwlock_trywrlock(&rw->lock);
 }
 
 inline static int arpc_rwlock_unlock(struct arpc_rwlock *rw)
@@ -168,15 +187,19 @@ inline static int arpc_cond_init(struct arpc_cond *cond)
 inline static int arpc_cond_lock(struct arpc_cond *cond)
 {
 	LOG_THEN_RETURN_VAL_IF_TRUE(!cond->is_inited, -1, "cond have not inited.");
-	pthread_mutex_lock(&cond->lock);
-	return 0;
+	return pthread_mutex_lock(&cond->lock);;
+}
+
+inline static int arpc_cond_trylock(struct arpc_cond *cond)
+{
+	LOG_THEN_RETURN_VAL_IF_TRUE(!cond->is_inited, -1, "cond have not inited.");
+	return pthread_mutex_trylock(&cond->lock);
 }
 
 inline static int arpc_cond_unlock(struct arpc_cond *cond)
 {
 	LOG_THEN_RETURN_VAL_IF_TRUE(!cond->is_inited, -1, "cond have not inited.");
-	pthread_mutex_unlock(&cond->lock);
-	return 0;
+	return pthread_mutex_unlock(&cond->lock);
 }
 
 inline static int arpc_cond_wait_timeout(struct arpc_cond *cond, uint64_t timeout_ms)
@@ -204,15 +227,13 @@ inline static int arpc_cond_wait(struct arpc_cond *cond)
 inline static int arpc_cond_notify(struct arpc_cond *cond)
 {
 	LOG_THEN_RETURN_VAL_IF_TRUE(!cond->is_inited, -1, "cond have not inited.");
-	pthread_cond_signal(&cond->cond);
-	return 0;
+	return pthread_cond_signal(&cond->cond);
 }
 
 inline static int arpc_cond_notify_all(struct arpc_cond *cond)
 {
 	LOG_THEN_RETURN_VAL_IF_TRUE(!cond->is_inited, -1, "cond have not inited.");
-	pthread_cond_broadcast(&cond->cond);
-	return 0;
+	return pthread_cond_broadcast(&cond->cond);;
 }
 
 inline static int arpc_cond_destroy(struct arpc_cond *cond)
@@ -232,42 +253,7 @@ inline static int arpc_cond_destroy(struct arpc_cond *cond)
 // 最小空闲的线程数
 #define ARPC_MIN_THREAD_IDLE_NUM    3
 
-enum session_status{
-	SESSION_STA_INIT = 0, 	 //初始化完毕
-	SESSION_STA_RUN, 		//运行
-	SESSION_STA_RUN_ACTION, //活跃，指链路联通
-	SESSION_STA_WAIT,
-	SESSION_STA_CLEANUP, 	//释放
-};
-
-enum session_type{
-	SESSION_CLIENT = 0, //
-	SESSION_SERVER, 	//
-	SESSION_SERVER_CHILD, 	//
-	SESSION_NONE, 	//
-};
-
-struct arpc_msg_buf {
-	struct xio_iovec_ex 		*xio_buf;
-	struct arpc_iov				*usr_buf;
-	uint32_t					depth;					// 申请发送buf分段深度（不包含buf空间），用于大块数据传输，默认为5个分段
-};
-
-
-struct arpc_msg_data {
-	void* (*alloc_cb)(uint32_t size, void* usr_context);
-	int (*free_cb)(void* buf_ptr, void* usr_context);
-	void* 						usr_ctx;				/* 用户上下文*/
-	struct arpc_vmsg 			*send;					/* 用户发送数据*/
-	uint32_t					iov_max_len;
-	struct xio_connection		*active_conn;			/* connection 资源*/
-	struct xio_msg				x_msg;
-	pthread_cond_t 				cond;					/* 数据接收的条件变量*/
-	pthread_mutex_t             lock;	    			/* lock */
-	uint32_t 		 			flag;
-};
-
-struct _async_proc_ops{
+struct async_proc_ops{
 	void* (*alloc_cb)(uint32_t size, void* usr_context);
 	int (*free_cb)(void* buf_ptr, void* usr_context);
 	int (*proc_async_cb)(const struct arpc_vmsg *req_iov, struct arpc_rsp *rsp_iov, void* usr_context);
@@ -275,17 +261,12 @@ struct _async_proc_ops{
 	int (*proc_oneway_async_cb)(const struct arpc_vmsg *, uint32_t *flags, void* usr_context);
 };
 
-struct _proc_header_func{
+struct proc_header_func{
 	void* (*alloc_cb)(uint32_t size, void* usr_context);
 	int (*free_cb)(void* buf_ptr, void* usr_context);
 	int (*proc_head_cb)(struct arpc_header_msg *header, void* usr_context, uint32_t *flag);
 };
 
-struct _rsp_complete_ctx{
-	struct arpc_vmsg *rsp_iov;
-	int (*release_rsp_cb)(struct arpc_vmsg *rsp_iov, void* usr_context);
-	void *rsp_usr_ctx;
-};
 
 static inline void arpc_sleep(uint64_t s)
 {
@@ -299,11 +280,40 @@ static inline void arpc_sleep(uint64_t s)
 static inline void arpc_usleep(uint64_t us)
 {
 	struct timeval time;
+	if(!us){
+		return;
+	}
 	time.tv_sec = 0;
 	time.tv_usec = us;
 	select(0, NULL, NULL, NULL, &time);
 	return;
 }
+
+struct arpc_thread_param{
+	void					*rsp_ctx;
+	struct xio_msg			*req_msg;
+	struct arpc_vmsg 		rev_iov;
+	struct async_proc_ops	ops;
+	int (*loop)(void *usr_ctx);
+	void					*usr_ctx;
+};
+
+#define ARPC_COM_MSG_MAGIC 0xfa577
+
+struct arpc_common_msg {
+	QUEUE 						q;
+	uint32_t					magic;
+	struct arpc_cond 			cond;				
+	struct arpc_connection		*conn;
+	struct xio_msg				*tx_msg;
+	uint32_t 					need_free;
+    uint32_t                    flag;
+	void 		                *usr_context;				/*! @brief 用户上下文 */
+    char                        ex_data[0];
+};
+
+struct arpc_common_msg *arpc_create_common_msg(uint32_t ex_data_size);
+int arpc_destroy_common_msg(struct arpc_common_msg *msg);
 
 // base
 #define ARPC_MEM_ALLOC(size, usr_context) malloc(size)
@@ -312,33 +322,20 @@ static inline void arpc_usleep(uint64_t us)
 #define SAFE_FREE_MEM(prt) do{if(prt) {ARPC_MEM_FREE(prt, NULL);prt= NULL;}}while(0);
 
 int get_uri(const struct arpc_con_info *param, char *uri, uint32_t uri_len);
-void* _arpc_get_threadpool();
+void* arpc_get_threadpool();
 uint32_t arpc_thread_max_num();
-int _arpc_get_ipv4_addr(struct sockaddr_storage *src_addr, char *ip, uint32_t len, uint32_t *port);
+int arpc_get_ipv4_addr(struct sockaddr_storage *src_addr, char *ip, uint32_t len, uint32_t *port);
 
 // others
-void _debug_printf_msg(struct xio_msg *rsp);
-int _post_iov_to_async_thread(struct arpc_vmsg *iov, struct xio_msg *oneway_msg, struct _async_proc_ops *ops, void *usr_ctx);
-int _arpc_wait_request_rsp(struct arpc_msg_data* pri_msg, int32_t timeout_ms);
-int _cond_wait_timeout(pthread_cond_t *cond, pthread_mutex_t *mutex, int32_t timeout_ms);
+void debug_printf_msg(struct xio_msg *rsp);
+int post_to_async_thread(struct arpc_thread_param *param);
 
-int _create_header_source(struct xio_msg *msg, struct _proc_header_func *ops, uint64_t iov_max_len, void *usr_ctx);
-int _clean_header_source(struct xio_msg *msg, mem_free_cb_t free_cb, void *usr_ctx);
-
-int _do_respone(struct arpc_vmsg *rsp_iov, struct xio_msg  *req, rsp_cb_t release_rsp_cb, void *rsp_ctx);
-
-// request
-int _process_request_header(struct xio_msg *msg, struct request_ops *ops, uint64_t iov_max_len, void *usr_ctx);
-int _process_request_data(struct xio_msg *req, struct request_ops *ops, int last_in_rxq, void *usr_ctx);
-int _process_send_rsp_complete(struct xio_msg *rsp, void *usr_ctx);
-
-// response
-int _process_rsp_header(struct xio_msg *rsp, void *usr_ctx);
-int _process_rsp_data(struct xio_msg *rsp, int last_in_rxq);
+int create_xio_msg_usr_buf(struct xio_msg *msg, struct proc_header_func *ops, uint64_t iov_max_len, void *usr_ctx);
+int destroy_xio_msg_usr_buf(struct xio_msg *msg, mem_free_cb_t free_cb, void *usr_ctx);
 
 // oneway
-int _process_oneway_header(struct xio_msg *msg, struct oneway_ops *ops, uint64_t iov_max_len, void *usr_ctx);
-int _process_oneway_data(struct xio_msg *req, struct oneway_ops *ops, int last_in_rxq, void *usr_ctx);
+int process_oneway_header(struct xio_msg *msg, struct oneway_ops *ops, uint64_t iov_max_len, void *usr_ctx);
+int process_oneway_data(struct xio_msg *req, struct oneway_ops *ops, int last_in_rxq, void *usr_ctx);
 
 #ifdef __cplusplus
 }

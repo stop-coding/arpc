@@ -49,6 +49,10 @@ void *xio_sg_table_ops_get(enum xio_sgl_type sgl_type)
 		[XIO_SGL_TYPE_IOV_PTR] = (void *)&sgtbl_ops_iovptr,
 		[XIO_SGL_TYPE_SCATTERLIST] = NULL
 	};
+	if (sgl_type >= XIO_SGL_TYPE_LAST) {
+		ERROR_LOG("sgl_type[%d] is invalid\n",sgl_type);
+		return NULL;
+	}
 
 	return vec[sgl_type];
 }

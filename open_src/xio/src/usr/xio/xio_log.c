@@ -38,6 +38,7 @@
 #include <xio_os.h>
 #include "libxio.h"
 #include "xio_log.h"
+#include <syslog.h>
 
 void xio_vlog(const char *file, unsigned line, const char *function,
 	      unsigned level, const char *fmt, ...);
@@ -83,14 +84,19 @@ void xio_vlog(const char *file, unsigned line, const char *function,
 		"[%012lu.%06lu] %-28s [%-5s] - %s",
 		tv.tv_sec, tv.tv_usec, buf2, level_str[level], buf);
 	*/
-	fprintf(stderr,
+	/*fprintf(stderr,
 		"[" LOG_TIME_FMT "] %-28s [%-5s] - %s",
+		t.tm_year + 1900, t.tm_mon + 1, t.tm_mday,
+		t.tm_hour, t.tm_min, t.tm_sec, tv.tv_usec,
+		buf2,
+		level_str[level], buf);*/
+	syslog(LOG_ERR,"[" LOG_TIME_FMT "] %-28s [%-5s] - %s",
 		t.tm_year + 1900, t.tm_mon + 1, t.tm_mday,
 		t.tm_hour, t.tm_min, t.tm_sec, tv.tv_usec,
 		buf2,
 		level_str[level], buf);
 
-	fflush(stderr);
+	//fflush(stderr);
 }
 
 /*---------------------------------------------------------------------------*/

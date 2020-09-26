@@ -705,6 +705,7 @@ static int xio_on_rsp_recv(struct xio_connection *connection,
 	struct xio_msg		*omsg;
 	struct xio_task		*sender_task = task->sender_task;
 	int			standalone_receipt = 0;
+	size_t	tx_bytes = 0;
 #ifdef XIO_CFLAG_STAT_COUNTERS
 	struct xio_statistics	*stats = &connection->ctx->stats;
 #endif
@@ -810,10 +811,14 @@ static int xio_on_rsp_recv(struct xio_connection *connection,
 			sgtbl_ops	= (struct xio_sg_table_ops *)
 				xio_sg_table_ops_get(omsg->out.sgl_type);
 
-			connection->tx_queued_msgs--;
-			connection->tx_bytes -=
-				(omsg->out.header.iov_len +
-					 tbl_length(sgtbl_ops, sgtbl));
+			tx_bytes = (omsg->out.header.iov_len + tbl_length(sgtbl_ops, sgtbl));
+
+			if (connection->tx_queued_msgs) 
+				connection->tx_queued_msgs--;
+			if(connection->tx_bytes > tx_bytes)
+				connection->tx_bytes -= tx_bytes;
+			else
+				connection->tx_bytes = 0;
 		}
 
 		omsg->sn	  = msg->sn; /* one way do have response */
@@ -1011,6 +1016,7 @@ static int xio_on_ow_req_send_comp(
 	struct xio_statistics	*stats = &connection->ctx->stats;
 #endif
 	struct xio_msg		*omsg = task->omsg;
+	size_t tx_bytes = 0;
 
 	if (connection->is_flushed) {
 		xio_tasks_pool_put(task);
@@ -1039,11 +1045,17 @@ static int xio_on_ow_req_send_comp(
 		sgtbl		= xio_sg_table_get(&omsg->out);
 		sgtbl_ops	= (struct xio_sg_table_ops *)
 				xio_sg_table_ops_get(omsg->out.sgl_type);
+		assert((omsg->out.header.iov_len +
+			 tbl_length(sgtbl_ops, sgtbl)) <= 1025*1024);
+		tx_bytes = (omsg->out.header.iov_len + tbl_length(sgtbl_ops, sgtbl));
+		assert(tx_bytes <= 1025*1024);
 
-		connection->tx_queued_msgs--;
-		connection->tx_bytes -=
-			(omsg->out.header.iov_len +
-			 tbl_length(sgtbl_ops, sgtbl));
+		if (connection->tx_queued_msgs) 
+				connection->tx_queued_msgs--;
+		if(connection->tx_bytes > tx_bytes)
+			connection->tx_bytes -= tx_bytes;
+		else
+			connection->tx_bytes = 0;
 	}
 
 	/* send completion notification to
