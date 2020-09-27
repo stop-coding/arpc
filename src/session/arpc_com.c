@@ -19,6 +19,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <arpa/inet.h>
+#include <sys/sysinfo.h>
 
 #include "arpc_com.h"
 #include "threadpool.h"
@@ -27,12 +28,16 @@
 struct aprc_paramter{
 	uint8_t is_init;
 	uint32_t thread_max_num;
+	uint32_t cpu_max_num;
 	tp_handle thread_pool;
+	struct arpc_mutex mutex;
 };
 
 static struct aprc_paramter g_param= {
-	.thread_max_num = 30,	//默认是个线程
+	.thread_max_num = 32,	//默认是个线程
+	.cpu_max_num    = 16,
 	.thread_pool	= NULL,
+	.mutex			= {.lock = PTHREAD_MUTEX_INITIALIZER,.is_inited = 1}
 };
 
 static const char SERVER_DEFAULT[] = "rsp-header:undefine";
@@ -75,35 +80,40 @@ int arpc_init_r(struct aprc_option *opt)
 {
 	struct tp_param p = {0};
 	ARPC_LOG_DEBUG( "arpc_init.");
+	arpc_mutex_lock(&g_param.mutex);
 	if (g_param.is_init){
 		ARPC_LOG_NOTICE( "arpc global init have done.");
+		arpc_mutex_unlock(&g_param.mutex);
 		return 0;
 	}
 	g_param.is_init = 1;
-	xio_init();
+	g_param.cpu_max_num = get_nprocs();
 	if (opt) {
-		//p.thread_max_num = (opt->thread_max_num > 1)?opt->thread_max_num:2;
-		//p.cpu_max_num = (opt->cpu_max_num > 1)?opt->cpu_max_num:4;
-		p.thread_max_num = 32;
-	}else{
-		//p.thread_max_num = g_param.thread_max_num;
-		p.thread_max_num = 32;
+		g_param.thread_max_num = (opt->thread_max_num > 4 && opt->thread_max_num < 1024)?opt->thread_max_num:g_param.thread_max_num;
+		g_param.cpu_max_num = (opt->cpu_max_num > 4 && opt->cpu_max_num <= g_param.cpu_max_num)?opt->cpu_max_num:g_param.cpu_max_num;
 	}
+	p.cpu_max_num = g_param.cpu_max_num;
+	p.thread_max_num = g_param.thread_max_num;
 	g_param.thread_pool = tp_create_thread_pool(&p);
+	arpc_mutex_unlock(&g_param.mutex);
+	xio_init();
 	return 0;
 }
 int arpc_init()
 {
 	struct tp_param p = {0};
 	ARPC_LOG_DEBUG( "arpc_init.");
+	arpc_mutex_lock(&g_param.mutex);
 	if (g_param.is_init){
 		ARPC_LOG_NOTICE( "arpc global init have done.");
+		arpc_mutex_unlock(&g_param.mutex);
 		return 0;
 	}
 	g_param.is_init = 1;
-	xio_init();
-	p.thread_max_num = 32;
+	p.thread_max_num = g_param.thread_max_num;
 	g_param.thread_pool = tp_create_thread_pool(&p);
+	arpc_mutex_unlock(&g_param.mutex);
+	xio_init();
 	return 0;
 }
 
@@ -129,6 +139,10 @@ uint32_t arpc_thread_max_num()
 	return g_param.thread_max_num;
 }
 
+uint32_t arpc_cpu_max_num()
+{
+	return g_param.cpu_max_num;
+}
 void debug_printf_msg(struct xio_msg *rsp)
 {
 	struct xio_iovec	*sglist = vmsg_base_sglist(&rsp->in);
@@ -187,7 +201,6 @@ int create_xio_msg_usr_buf(struct xio_msg *msg, struct proc_header_func *ops, ui
 	msg->in.sgl_type = XIO_SGL_TYPE_IOV;
 	LOG_THEN_RETURN_VAL_IF_TRUE((!msg->in.header.iov_base || !msg->in.header.iov_len), -1, "header null.");
 	LOG_THEN_RETURN_VAL_IF_TRUE((!msg->in.header.iov_len), -1, "header len is 0.");
-	LOG_THEN_RETURN_VAL_IF_TRUE((!ops->proc_head_cb), -1, "proc_head_cb null.");
 
 	memset(&header, 0, sizeof(struct arpc_header_msg));
 	header.head = msg->in.header.iov_base;
@@ -195,11 +208,18 @@ int create_xio_msg_usr_buf(struct xio_msg *msg, struct proc_header_func *ops, ui
 	header.data_len = msg->in.total_data_len;
 	// header process
 	msg->usr_flags = 0;
-	ret = ops->proc_head_cb(&header, usr_ctx, &flag);
-	if (ret != ARPC_SUCCESS || !msg->in.total_data_len){
+	if(ops->proc_head_cb){
+		ret = ops->proc_head_cb(&header, usr_ctx, &flag);
+		if (ret != ARPC_SUCCESS || !msg->in.total_data_len){
+			//SET_FLAG(msg->usr_flags, FLAG_MSG_ERROR_DISCARD_DATA); // data数据不做处理
+			ARPC_LOG_DEBUG("discard data, total_data_len[%lu].", msg->in.total_data_len);
+			return ARPC_ERROR;
+		}
+	}
+	if (!msg->in.total_data_len){
 		//SET_FLAG(msg->usr_flags, FLAG_MSG_ERROR_DISCARD_DATA); // data数据不做处理
 		ARPC_LOG_DEBUG("discard data, total_data_len[%lu].", msg->in.total_data_len);
-		return ARPC_ERROR;
+		return 0;
 	}
 	msg->usr_flags = flag;
 	// alloc data buf form user define call back
@@ -252,44 +272,20 @@ error_1:
 	return -1;
 }
 
-int destroy_xio_msg_usr_buf(struct xio_msg *msg, mem_free_cb_t free_cb, void *usr_ctx)
+int destroy_xio_msg_usr_buf(struct arpc_vmsg *rev_iov, mem_free_cb_t free_cb, void *usr_ctx)
 {
-	struct xio_iovec	*sglist;
-	uint32_t			nents;
 	uint32_t i;
 
-	LOG_THEN_RETURN_VAL_IF_TRUE((!msg), ARPC_ERROR, "msg null.");
+	LOG_THEN_RETURN_VAL_IF_TRUE((!rev_iov), ARPC_ERROR, "msg null.");
 	LOG_THEN_RETURN_VAL_IF_TRUE((!free_cb), ARPC_ERROR, "alloc free is null.");
 
-	// 释放内存
-	nents = vmsg_sglist_nents(&msg->in);
-	sglist = vmsg_base_sglist(&msg->in);
-	if (!sglist || !nents){
-		ARPC_LOG_DEBUG("msg buf is null, nents:%u.", nents);
-		return ARPC_ERROR;
+	for (i = 0; i < rev_iov->vec_num; i++) {
+		if (rev_iov->vec[i].data)
+			free_cb(rev_iov->vec[i].data, usr_ctx);
 	}
-
-	if (IS_SET(msg->usr_flags, METHOD_CALLER_HIJACK_RX_DATA)){
-		return 0;
-	}
+	if (rev_iov->vec)
+		ARPC_MEM_FREE(rev_iov->vec, NULL);
 	
-	if (!IS_SET(msg->usr_flags, METHOD_ALLOC_DATA_BUF)) {
-		ARPC_LOG_ERROR("not need free data buf.");
-		return ARPC_ERROR;
-	}
-
-	for (i = 0; i < nents; i++) {
-		if (sglist[i].iov_base)
-			free_cb(sglist[i].iov_base, usr_ctx);
-	}
-	if (sglist)
-		ARPC_MEM_FREE(sglist, NULL);
-	
-	// 出参
-	msg->in.data_tbl.sglist = NULL;
-	vmsg_sglist_set_nents(&msg->in, 0);
-	msg->in.sgl_type	= XIO_SGL_TYPE_IOV;
-	CLR_FLAG(msg->usr_flags, METHOD_ALLOC_DATA_BUF);
 	return 0;
 }
 
@@ -305,6 +301,7 @@ struct arpc_common_msg *arpc_create_common_msg(uint32_t ex_data_size)
 	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, error, "arpc_cond_init for new msg fail.");
 	req_msg->flag = 0;
 	QUEUE_INIT(&req_msg->q);
+	req_msg->magic = ARPC_COM_MSG_MAGIC;
 	return req_msg;
 error:
 	SAFE_FREE_MEM(req_msg);

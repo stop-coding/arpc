@@ -1045,10 +1045,8 @@ static int xio_on_ow_req_send_comp(
 		sgtbl		= xio_sg_table_get(&omsg->out);
 		sgtbl_ops	= (struct xio_sg_table_ops *)
 				xio_sg_table_ops_get(omsg->out.sgl_type);
-		assert((omsg->out.header.iov_len +
-			 tbl_length(sgtbl_ops, sgtbl)) <= 1025*1024);
+
 		tx_bytes = (omsg->out.header.iov_len + tbl_length(sgtbl_ops, sgtbl));
-		assert(tx_bytes <= 1025*1024);
 
 		if (connection->tx_queued_msgs) 
 				connection->tx_queued_msgs--;

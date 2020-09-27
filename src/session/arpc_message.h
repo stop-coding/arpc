@@ -36,17 +36,19 @@ struct arpc_msg_ex {
 	void* (*alloc_cb)(uint32_t size, void* usr_context);	/*! @brief 用于接收rsp消息时分配内存，可选 */
 	int   (*free_cb)(void* buf_ptr, void* usr_context);		/*! @brief 内存释放 可选*/
 	void 		*usr_context;								/*! @brief 用户上下文 */
-    uint32_t                    flag;
+    uint32_t                    flags;
     uint64_t                    iov_max_len;
 };
 
 int conver_msg_arpc_to_xio(const struct arpc_vmsg *usr_msg, struct xio_vmsg *xio_msg);
 void release_arpc2xio_msg(struct xio_vmsg *xio_msg);
+
 int conver_msg_xio_to_arpc(const struct xio_vmsg *xio_msg, struct arpc_vmsg *msg);
 void release_xio2arpc_msg(struct arpc_vmsg *msg);
 
 int alloc_xio_msg_usr_buf(struct xio_msg *msg, struct arpc_msg *arpc_msg);
 int free_receive_msg_buf(struct arpc_msg *msg);
+
 #ifdef __cplusplus
 }
 #endif

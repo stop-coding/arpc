@@ -15,8 +15,8 @@
 * \note none 
 */
 
-#ifndef _ARPC_RESPONSE_H
-#define _ARPC_RESPONSE_H
+#ifndef _ARPC_PROCESS_ONEWAY_H
+#define _ARPC_PROCESS_ONEWAY_H
 
 #include <stdio.h>
 #include <string.h>
@@ -28,16 +28,9 @@
 #include "arpc_com.h"
 #include "arpc_session.h"
 
-struct arpc_rsp_handle {
-	struct xio_msg				x_req_msg;
-    struct xio_msg				*x_rsp_msg;
-	struct arpc_vmsg 			*rsp_usr_iov;
-	int (*release_rsp_cb)(struct arpc_vmsg *rsp_iov, void* rsp_usr_ctx);
-	void *rsp_usr_ctx;
-};
 
-int arpc_init_response(struct arpc_common_msg *rsp_fd);
-int arpc_send_response_complete(struct arpc_common_msg *rsp_fd);
+int process_oneway_header(struct xio_msg *msg, struct oneway_ops *ops, uint64_t iov_max_len, void *usr_ctx);
+int process_oneway_data(struct xio_msg *req, struct oneway_ops *ops, int last_in_rxq, void *usr_ctx);
 
 #ifdef __cplusplus
 }

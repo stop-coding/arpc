@@ -45,35 +45,50 @@ int arpc_do_response(arpc_rsp_handle_t *rsp_fd, struct arpc_vmsg *rsp_iov, rsp_c
 	LOG_THEN_RETURN_VAL_IF_TRUE((!release_rsp_cb), ARPC_ERROR, "rsp_iov is null.");
 
 	arpc_rsp_fd = (struct arpc_common_msg *)(*rsp_fd);
-	rsp_fd_ex = (struct arpc_rsp_handle*)arpc_rsp_fd->ex_data;
 	
+	ret = arpc_cond_lock(&arpc_rsp_fd->cond);
+	LOG_THEN_RETURN_VAL_IF_TRUE(ret, ARPC_ERROR, "arpc_cond_lock msg fail, maybe free...");
+
+	rsp_fd_ex = (struct arpc_rsp_handle*)arpc_rsp_fd->ex_data;
 	rsp_fd_ex->release_rsp_cb = release_rsp_cb;
 	rsp_fd_ex->rsp_usr_iov = rsp_iov;
 	rsp_fd_ex->rsp_usr_ctx = rsp_cb_ctx;
+	ret = arpc_init_response(arpc_rsp_fd);
+	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, unlock, "arpc_init_response fail.");
+	arpc_cond_unlock(&arpc_rsp_fd->cond);
 
-	ret = arpc_send_response(arpc_rsp_fd);
+	ret = arpc_session_async_send(arpc_rsp_fd->conn, arpc_rsp_fd);
 	LOG_THEN_RETURN_VAL_IF_TRUE(ret, ARPC_ERROR, "arpc_session_send_response fail.");
+
 	*rsp_fd = NULL;
 	return 0;
+unlock:
+	return -1;
 }
 
-int arpc_send_response(struct arpc_common_msg *rsp_fd)
+int arpc_init_response(struct arpc_common_msg *rsp_fd)
 {
 	struct xio_msg  	*rsp_msg;
 	uint32_t			i;
 	struct arpc_rsp_handle *rsp_fd_ex;
 	struct  arpc_vmsg  *rsp_iov;
+
 	LOG_THEN_RETURN_VAL_IF_TRUE(!rsp_fd, -1, "release_rsp_cb is null ,can't send user rsp data.");
 	LOG_THEN_RETURN_VAL_IF_TRUE(!rsp_fd->conn, -1, "conn is null ,can't send user rsp data.");
+
 	rsp_fd_ex = (struct arpc_rsp_handle*)rsp_fd->ex_data;
 	rsp_msg = &rsp_fd_ex->x_req_msg;
 	rsp_iov = rsp_fd_ex->rsp_usr_iov;
 	rsp_fd->tx_msg = rsp_msg;
+	
 	LOG_THEN_RETURN_VAL_IF_TRUE(!rsp_fd_ex->x_rsp_msg, -1, "x_rsp_msg is null ,can't send user rsp data.");
+
 	if(rsp_iov && rsp_iov->head && rsp_iov->head_len){
 		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!rsp_fd_ex->release_rsp_cb, rsp_default, "release_rsp_cb is null ,can't send user rsp data.");
+
 		rsp_msg->out.header.iov_base = rsp_iov->head;
 		rsp_msg->out.header.iov_len  = rsp_iov->head_len;
+		//data
 		if (rsp_iov->vec && rsp_iov->vec_num) {
 			rsp_msg->out.total_data_len  = rsp_iov->total_data;
 			rsp_msg->out.sgl_type = XIO_SGL_TYPE_IOV_PTR;
@@ -104,23 +119,24 @@ rsp_default:
 rsp:	
 	rsp_msg->request = rsp_fd_ex->x_rsp_msg;
 	rsp_msg->user_context = (void*)rsp_fd;
-	arpc_session_send_response(rsp_fd->conn, rsp_fd);
 	return 0;
 }
 
-int arpc_do_response_complete(struct arpc_common_msg *rsp_fd, struct arpc_connection *con)
+// 注意必须在同步回调线程里执行
+int arpc_send_response_complete(struct arpc_common_msg *rsp_fd)
 {
 	int ret;
 	struct arpc_rsp_handle *rsp_fd_ex;
 	LOG_THEN_RETURN_VAL_IF_TRUE(!rsp_fd, ARPC_ERROR, "rsp_fd IS NULL");
+
 	ret = arpc_cond_lock(&rsp_fd->cond);
 	LOG_THEN_RETURN_VAL_IF_TRUE(ret, ARPC_ERROR, "arpc_cond_lock fail.");
+
 	rsp_fd_ex = (struct arpc_rsp_handle*)rsp_fd->ex_data;
 	if (rsp_fd_ex->release_rsp_cb && rsp_fd_ex->rsp_usr_iov) {
 		rsp_fd_ex->release_rsp_cb(rsp_fd_ex->rsp_usr_iov, rsp_fd_ex->rsp_usr_ctx);
 	}
 	ret = arpc_cond_unlock(&rsp_fd->cond);
-	arpc_session_send_complete(con);
 	arpc_destroy_common_msg(rsp_fd);
 
 	return 0;

@@ -317,7 +317,6 @@ int xio_connection_send(struct xio_connection *connection,
 			return -EAGAIN;
 		}
 		tx_bytes  = msg->out.header.iov_len + tbl_length(sgtbl_ops, sgtbl);
-		assert(tx_bytes <= 1025*1024);
 		/* message does not fit into remote queue */
 		if (connection->session->peer_rcv_queue_depth_bytes <
 		    tx_bytes) {
@@ -1098,7 +1097,6 @@ int xio_send_request(struct xio_connection *connection,
 		pmsg->type = XIO_MSG_TYPE_REQ;
 
 		if (connection->enable_flow_control) {
-			assert(tx_bytes <= 1025*1024);
 			connection->tx_queued_msgs++;
 			connection->tx_bytes += tx_bytes;
 		}
@@ -1365,9 +1363,6 @@ static int xio_send_typed_msg(struct xio_connection *connection,
 		sgtbl		= xio_sg_table_get(&pmsg->out);
 		sgtbl_ops	= (struct xio_sg_table_ops *)
 				       xio_sg_table_ops_get(pmsg->out.sgl_type);
-		if(!sgtbl_ops) {
-			abort();
-		}
 		tx_bytes	= pmsg->out.header.iov_len + tbl_length(
 								    sgtbl_ops,
 								    sgtbl);

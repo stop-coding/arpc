@@ -975,7 +975,8 @@ int xio_tcp_xmit(struct xio_tcp_transport *tcp_hndl)
 	    tcp_hndl->tx_comp_cnt > COMPLETION_BATCH_MAX ||
 	    tcp_hndl->state != XIO_TRANSPORT_STATE_CONNECTED) {
 		xio_set_error(XIO_EAGAIN);
-		ERROR_LOG(" xio err tx_comp_cnt:%u\n", tcp_hndl->tx_comp_cnt);
+		ERROR_LOG(" xio err tx_comp_cnt:%u, state:%d, tx_ready_tasks_num:%d\n", 
+					tcp_hndl->tx_comp_cnt, tcp_hndl->state, tcp_hndl->tx_ready_tasks_num);
 		return -1;
 	}
 
@@ -1223,7 +1224,6 @@ int xio_tcp_xmit(struct xio_tcp_transport *tcp_hndl)
 			break;
 		default:
 			ERROR_LOG("unknown TX stage %d\n", tcp_task->txd.stage);
-			abort();
 			tcp_task->txd.stage = XIO_TCP_TX_BEFORE;
 			break;
 		}
@@ -2036,7 +2036,6 @@ int xio_tcp_recv_ctl_work(struct xio_tcp_transport *tcp_hndl, int fd,
 	if (xio_recv->msg.msg_iovlen > 1 ||
 	    xio_recv->tot_iov_byte_len != xio_recv->msg.msg_iov[0].iov_len) {
 		ERROR_LOG("expecting only 1 sized iovec\n");
-		abort();
 		return 0;
 	}
 	while (xio_recv->tot_iov_byte_len) {

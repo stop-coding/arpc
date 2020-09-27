@@ -50,6 +50,7 @@ int process_request_data(struct arpc_connection *con, struct xio_msg *req, struc
 	int					ret;
 
 	LOG_THEN_RETURN_VAL_IF_TRUE((!req), ARPC_ERROR, "req null.");
+	LOG_THEN_RETURN_VAL_IF_TRUE((!ops), ARPC_ERROR, "ops null.");
 
 	memset(&rev_iov, 0, sizeof(struct arpc_vmsg));
 	rev_iov.head = req->in.header.iov_base;
@@ -60,18 +61,25 @@ int process_request_data(struct arpc_connection *con, struct xio_msg *req, struc
 	
 	rsp_hanlde = arpc_create_common_msg(sizeof(struct arpc_rsp_handle));
 	LOG_THEN_RETURN_VAL_IF_TRUE(!rsp_hanlde, ARPC_ERROR, "rsp_hanlde alloc null.");
+	rsp_hanlde->type = ARPC_MSG_TYPE_RSP;
 	rsp_hanlde->conn = con;
 	rsp_fd_ex = (struct arpc_rsp_handle*)rsp_hanlde->ex_data;
 	rsp_fd_ex->x_rsp_msg = req;
 
 	memset(&usr_rsp_param, 0, sizeof(struct arpc_rsp));
 	usr_rsp_param.rsp_fd = (void *)rsp_hanlde;
+
 	if(IS_SET(req->usr_flags, METHOD_ARPC_PROC_SYNC) && ops->proc_data_cb){
 		ret = ops->proc_data_cb(&rev_iov, &usr_rsp_param, usr_ctx);
 		LOG_ERROR_IF_VAL_TRUE(ret, "proc_data_cb that define for user is error.");
 		if (!IS_SET(usr_rsp_param.flags, METHOD_CALLER_HIJACK_RX_DATA)) {
-			destroy_xio_msg_usr_buf(req, ops->free_cb, usr_ctx);
+			destroy_xio_msg_usr_buf(&rev_iov, ops->free_cb, usr_ctx);
 		}
+		// 同步释放资源
+		req->in.header.iov_base = NULL;
+		req->in.header.iov_len = 0;
+		vmsg_sglist_set_nents(&req->in, 0);
+
 		if (IS_SET(usr_rsp_param.flags, METHOD_CALLER_ASYNC)) {
 			goto end;
 		}else{
@@ -95,7 +103,7 @@ int process_request_data(struct arpc_connection *con, struct xio_msg *req, struc
 		async_param->ops.proc_oneway_async_cb = NULL;
 		async_param->rsp_ctx = rsp_hanlde;
 		async_param->rev_iov = rev_iov;
-		async_param->req_msg = req;
+		async_param->req_msg = NULL;
 		async_param->usr_ctx = usr_ctx;
 		async_param->loop = &request_msg_async_deal;
 		//deepcopy
@@ -103,6 +111,10 @@ int process_request_data(struct arpc_connection *con, struct xio_msg *req, struc
 			async_param->rev_iov.head = ARPC_MEM_ALLOC(rev_iov.head_len, NULL);
 			memcpy(async_param->rev_iov.head, rev_iov.head, rev_iov.head_len);
 		}
+
+		req->in.header.iov_base = NULL;
+		req->in.header.iov_len = 0;
+		vmsg_sglist_set_nents(&req->in, 0);
 
 		ret = post_to_async_thread(async_param);
 		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, free_user_buf, "post_to_async_thread fail, can't do async.");
@@ -113,11 +125,17 @@ int process_request_data(struct arpc_connection *con, struct xio_msg *req, struc
 end:
 	return 0;
 free_user_buf:
-	destroy_xio_msg_usr_buf(req, ops->free_cb, usr_ctx);
+	destroy_xio_msg_usr_buf(&rev_iov, ops->free_cb, usr_ctx);
 
 do_respone:	
 	/* attach request to response */
-	return arpc_send_response(rsp_hanlde);
+	ret = arpc_init_response(rsp_hanlde);
+	LOG_ERROR_IF_VAL_TRUE(ret, "arpc_init_response fail.");
+	if(!ret){
+		ret = arpc_session_async_send(rsp_hanlde->conn, rsp_hanlde);
+		LOG_ERROR_IF_VAL_TRUE(ret, "arpc_session_async_send fail.");
+	}
+	return ret;
 }
 
 static int request_msg_async_deal(void *usr_ctx)
@@ -139,8 +157,9 @@ static int request_msg_async_deal(void *usr_ctx)
 
 	ret = async->ops.proc_async_cb(&async->rev_iov, &rsp, async->usr_ctx);
 	LOG_ERROR_IF_VAL_TRUE(ret, "proc_async_cb of request error.");
+
 	if (!IS_SET(rsp.flags, METHOD_CALLER_HIJACK_RX_DATA)) {
-		ret = destroy_xio_msg_usr_buf(async->req_msg, async->ops.free_cb, async->usr_ctx);
+		ret = destroy_xio_msg_usr_buf(&async->rev_iov, async->ops.free_cb, async->usr_ctx);
 		LOG_ERROR_IF_VAL_TRUE(ret, "proc_async_cb of request error.");
 		async->rev_iov.vec = NULL;
 	}
@@ -148,9 +167,14 @@ static int request_msg_async_deal(void *usr_ctx)
 	rsp_fd_ex = (struct arpc_rsp_handle*)rsp_fd->ex_data;
 	rsp_fd_ex->rsp_usr_iov = rsp.rsp_iov;
 	rsp_fd_ex->release_rsp_cb = async->ops.release_rsp_cb;
+
 	if (!IS_SET(rsp.flags, METHOD_CALLER_ASYNC)) {
-		ret = arpc_send_response(rsp_fd);
+		ret = arpc_init_response(rsp_fd);
 		LOG_ERROR_IF_VAL_TRUE(ret, "arpc_do_respone fail.");
+		if(!ret){
+			ret = arpc_session_async_send(rsp_fd->conn, rsp_fd);
+			LOG_ERROR_IF_VAL_TRUE(ret, "arpc_do_respone fail.");
+		}
 	}
 	SAFE_FREE_MEM(async->rev_iov.head);
 	SAFE_FREE_MEM(async);

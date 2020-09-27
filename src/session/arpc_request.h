@@ -50,8 +50,8 @@ _usr_msg_ex = ((struct arpc_request_handle *)_com_msg->ex_data)->msg_ex;
 struct arpc_msg_ex *_usr_msg_ex;\
 _usr_msg_ex = ((struct arpc_request_handle *)_com_msg->ex_data)->msg_ex;
 
-int arpc_request_send_complete(struct arpc_common_msg *msg);
-int arpc_oneway_send_complete(struct arpc_common_msg *ow_msg, struct arpc_connection *con);
+int arpc_request_rsp_complete(struct arpc_common_msg *req_msg);
+int arpc_oneway_send_complete(struct arpc_common_msg *ow_msg);
 
 #ifdef __cplusplus
 }

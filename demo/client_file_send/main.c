@@ -44,6 +44,292 @@ void conver_hex_to_str(BYTE *hex, int hex_len, BYTE *str, int str_len)
 	return;
 }
 
+static char rsp_header[] = "<file:rsp>";
+static char rsp_iov_data[] = "<iov:rsp>.....................";
+
+static void *mem_alloc(uint32_t size, void *usr_context)
+{
+	void *mem = malloc(size);
+	return mem;
+}
+static int mem_free(void *buf_ptr, void *usr_context)
+{
+	if(buf_ptr)
+		free(buf_ptr);
+	return 0;
+}
+
+static int process_rx_header(struct arpc_header_msg *header, void* usr_context, uint32_t *flag)
+{
+	SET_METHOD(*flag, METHOD_ALLOC_DATA_BUF);// vec数据释放
+	return 0;
+}
+
+static int process_rx_data(const struct arpc_vmsg *req_iov, struct arpc_rsp *rsp, void *usr_context)
+{
+	char file_path[512] = {0};
+	FILE *fp = NULL;
+	uint32_t i;
+	struct arpc_vmsg *rsp_data;
+	BYTE buf[SHA256_BLOCK_SIZE];
+	BYTE buf_str[SHA256_BLOCK_SIZE*2 +1];
+	SHA256_CTX ctx;
+
+	if (!req_iov || !usr_context){
+		BASE_LOG_ERROR("null inputn");
+		return 0;
+	}
+	sprintf(file_path, "./rev_%s", (char *)usr_context);
+
+	BASE_LOG_NOTICE("------file:%s, receive len:%lu.\n", file_path, req_iov->total_data);
+	BASE_LOG_NOTICE("------file:%s, receive len:%lu.\n", file_path, req_iov->total_data);
+	fp = fopen(file_path, "ab");
+	if (!fp){
+		BASE_LOG_ERROR("fopen path:%s fail.\n", file_path);
+		return 0;
+	}
+	sha256_init(&ctx);
+	for(i = 0; i < req_iov->vec_num; i++){
+		fwrite(req_iov->vec[i].data, 1, req_iov->vec[i].len, fp);
+		fseek(fp, 0, SEEK_END);
+		sha256_update(&ctx, req_iov->vec[i].data, req_iov->vec[i].len);
+	}
+	sha256_final(&ctx, buf);
+	fclose(fp);
+
+	conver_hex_to_str(buf, sizeof(buf), buf_str, sizeof(buf_str));
+	BASE_LOG_ERROR("sha256:%s.", (char*)buf_str);
+
+	rsp_data = mem_alloc(sizeof(struct arpc_vmsg), NULL);
+	memset(rsp_data, 0, sizeof(struct arpc_vmsg));
+
+	rsp_data->head_len = sizeof(buf_str);
+	rsp_data->head = mem_alloc(rsp_data->head_len, NULL);
+	memcpy(rsp_data->head, buf_str, sizeof(buf_str));
+
+	rsp_data->vec_num = 1;
+	rsp_data->vec = mem_alloc(rsp_data->vec_num * sizeof(struct arpc_iov), NULL);
+	for(i = 0; i < rsp_data->vec_num; i++){
+		rsp_data->vec[i].data = mem_alloc(sizeof(buf_str), NULL);
+		memcpy(rsp_data->vec[i].data, buf_str, sizeof(buf_str));
+		rsp_data->vec[i].len = sizeof(buf_str);
+		rsp_data->total_data +=rsp_data->vec[i].len;
+	}
+	rsp->rsp_iov = rsp_data;
+	rsp->flags = 0;
+	return 0;
+}
+static int release_rsp(struct arpc_vmsg *rsp_iov, void *usr_context)
+{
+	int i;
+	if(!rsp_iov){
+		BASE_LOG_ERROR("null rsp fail.\n");
+		return -1;
+	}
+	if (rsp_iov->head) {
+		mem_free(rsp_iov->head, NULL);
+		rsp_iov->head =NULL;
+	}
+
+	for(i = 0; i < rsp_iov->vec_num; i++){
+		if(rsp_iov->vec[i].data){
+			mem_free(rsp_iov->vec[i].data, NULL);
+		}
+	}
+	if(rsp_iov->vec){
+		mem_free(rsp_iov->vec, NULL);
+	}
+	if(rsp_iov){
+		mem_free(rsp_iov, NULL);
+	}
+	return 0;
+}
+
+int new_session_start(const struct arpc_new_session_req *client, struct arpc_new_session_rsp *param, void* usr_context)
+{
+	char file_path[512] = {0};
+	FILE *fp = NULL;
+	if (client && client->client_data.data){
+		memcpy(usr_context, client->client_data.data, client->client_data.len);
+		sprintf(file_path, "./rev_%s", (char *)usr_context);
+		fp = fopen(file_path, "w");
+		if (!fp){
+			BASE_LOG_ERROR("fopen path:%s fail.\n", file_path);
+			return 0;
+		}
+		fclose(fp);
+	}
+	return 0;
+}
+
+static arpc_session_handle_t session_fd = NULL;
+int new_session_end(arpc_session_handle_t fd, struct arpc_new_session_rsp *param, void* usr_context)
+{
+	session_fd = fd;
+	return 0;
+}
+
+
+static int process_async(const struct arpc_vmsg *req_iov, struct arpc_rsp *rsp, void* usr_context)
+{
+	FILE *fp = NULL;
+	char file_path[512] = {0};
+	uint32_t i;
+	struct arpc_vmsg *rsp_data;
+	BYTE buf[SHA256_BLOCK_SIZE];
+	BYTE buf_str[SHA256_BLOCK_SIZE*2 +1];
+	SHA256_CTX ctx;
+	if (!req_iov || !usr_context){
+		BASE_LOG_ERROR("null inputn");
+		return 0;
+	}
+	sprintf(file_path, "./rev_%s", (char *)usr_context);
+
+	BASE_LOG_NOTICE("----dddd--file:%s, receive len:%lu.\n", file_path, req_iov->total_data);
+
+	fp = fopen(file_path, "ab");
+	if (!fp){
+		BASE_LOG_ERROR("fopen path:%s fail.\n", file_path);
+		return 0;
+	}
+	sha256_init(&ctx);
+	for(i = 0; i < req_iov->vec_num; i++){
+		fwrite(req_iov->vec[i].data, 1, req_iov->vec[i].len, fp);
+		fseek(fp, 0, SEEK_END);
+		sha256_update(&ctx, req_iov->vec[i].data, req_iov->vec[i].len);
+	}
+	sha256_final(&ctx, buf);
+	fclose(fp);
+	BASE_LOG_NOTICE("----dddd--end.\n");
+
+	conver_hex_to_str(buf, sizeof(buf), buf_str, sizeof(buf_str));
+	BASE_LOG_ERROR("sha256:%s.", (char*)buf_str);
+
+	rsp_data = mem_alloc(sizeof(struct arpc_vmsg), NULL);
+	memset(rsp_data, 0, sizeof(struct arpc_vmsg));
+
+	rsp_data->head_len = sizeof(buf_str);
+	rsp_data->head = mem_alloc(rsp_data->head_len, NULL);
+	memcpy(rsp_data->head, buf_str, sizeof(buf_str));
+
+	rsp_data->vec_num = 1;
+	rsp_data->vec = mem_alloc(rsp_data->vec_num * sizeof(struct arpc_iov), NULL);
+	for(i = 0; i < rsp_data->vec_num; i++){
+		rsp_data->vec[i].data = mem_alloc(sizeof(buf_str), NULL);
+		memcpy(rsp_data->vec[i].data, buf_str, sizeof(buf_str));
+		rsp_data->vec[i].len = sizeof(buf_str);
+		rsp_data->total_data +=rsp_data->vec[i].len;
+	}
+	rsp->rsp_iov = rsp_data;
+	BASE_LOG_NOTICE("----dddd--end:%p.\n", rsp_data);
+	rsp->flags = 0;
+
+	return 0;
+}
+static int process_rx_oneway_data(const struct arpc_vmsg *req_iov, uint32_t *flags, void *usr_context)
+{
+	char file_path[512] = {0};
+	FILE *fp = NULL;
+	uint32_t i;
+	BASE_LOG_ERROR("null inputn------------------");
+	if (!req_iov || !usr_context){
+		BASE_LOG_ERROR("null inputn");
+		return 0;
+	}
+	sprintf(file_path, "./rev_%s", (char *)usr_context);
+
+	BASE_LOG_NOTICE("sync------file:%s, receive len:%lu.\n", file_path, req_iov->total_data);
+	BASE_LOG_NOTICE("------file:%s, receive len:%lu.\n", file_path, req_iov->total_data);
+	fp = fopen(file_path, "ab");
+	if (!fp){
+		BASE_LOG_ERROR("fopen path:%s fail.\n", file_path);
+		return 0;
+	}
+	for(i = 0; i < req_iov->vec_num; i++){
+		fwrite(req_iov->vec[i].data, 1, req_iov->vec[i].len, fp);
+		fseek(fp, 0, SEEK_END);
+	}
+	fclose(fp);
+	return 0;
+}
+
+static int process_oneway_async(const struct arpc_vmsg *req_iov, uint32_t *flags, void* usr_context)
+{
+	FILE *fp = NULL;
+	char file_path[512] = {0};
+	uint32_t i;
+	int ret;
+	struct arpc_vmsg *rsp_data;
+	BYTE buf[SHA256_BLOCK_SIZE];
+	BYTE buf_str[SHA256_BLOCK_SIZE*2 +1];
+	SHA256_CTX ctx;
+
+	if (!req_iov || !usr_context){
+		BASE_LOG_ERROR("null inputn");
+		return 0;
+	}
+	sprintf(file_path, "./rev_%s", (char *)usr_context);
+	BASE_LOG_NOTICE("async------file:%s, receive len:%lu.\n", file_path, req_iov->total_data);
+	BASE_LOG_NOTICE("------file:%s, receive len:%lu.\n", file_path, req_iov->total_data);
+	fp = fopen(file_path, "ab");
+	if (!fp){
+		BASE_LOG_ERROR("fopen path:%s fail.\n", file_path);
+		return 0;
+	}
+	sha256_init(&ctx);
+	for(i = 0; i < req_iov->vec_num; i++){
+		fwrite(req_iov->vec[i].data, 1, req_iov->vec[i].len, fp);
+		fseek(fp, 0, SEEK_END);
+		sha256_update(&ctx, req_iov->vec[i].data, req_iov->vec[i].len);
+	}
+	sha256_final(&ctx, buf);
+	fclose(fp);
+
+	conver_hex_to_str(buf, sizeof(buf), buf_str, sizeof(buf_str));
+	BASE_LOG_ERROR("sha256:%s.", (char*)buf_str);
+
+	rsp_data = mem_alloc(sizeof(struct arpc_vmsg), NULL);
+	memset(rsp_data, 0, sizeof(struct arpc_vmsg));
+
+	rsp_data->head_len = sizeof(buf_str);
+	rsp_data->head = mem_alloc(rsp_data->head_len, NULL);
+	memcpy(rsp_data->head, buf_str, sizeof(buf_str));
+
+	rsp_data->vec_num = 1;
+	rsp_data->vec = mem_alloc(rsp_data->vec_num * sizeof(struct arpc_iov), NULL);
+	for(i = 0; i < rsp_data->vec_num; i++){
+		rsp_data->vec[i].data = mem_alloc(sizeof(buf_str), NULL);
+		memcpy(rsp_data->vec[i].data, buf_str, sizeof(buf_str));
+		rsp_data->vec[i].len = sizeof(buf_str);
+		rsp_data->total_data +=rsp_data->vec[i].len;
+	}
+
+	//ret = arpc_send_oneway_msg(session_fd, rsp_data, release_rsp, NULL);
+	//if(ret){
+	//	BASE_LOG_ERROR("arpc_send_oneway_msg:%s fail.", (char*)buf_str);
+	//	release_rsp(rsp_data, NULL);
+	//}
+	return 0;
+}
+
+static struct arpc_session_ops ops ={
+	.req_ops = {
+		.alloc_cb = &mem_alloc,
+		.free_cb = &mem_free,
+		.proc_head_cb = &process_rx_header,
+		.proc_data_cb = &process_rx_data,
+		.proc_async_cb = &process_async,
+		.release_rsp_cb = &release_rsp,
+	},
+	.oneway_ops = {
+		.alloc_cb = &mem_alloc,
+		.free_cb = &mem_free,
+		.proc_head_cb = &process_rx_header,
+		.proc_data_cb = &process_rx_oneway_data,
+		.proc_async_cb = &process_oneway_async,
+	}
+};
+
 /*---------------------------------------------------------------------------*/
 /* main									     */
 /*---------------------------------------------------------------------------*/
@@ -85,7 +371,9 @@ int main(int argc, char *argv[])
 	param.con.ipv4.port = atoi(argv[2]);
 	param.req_data = argv[4];
 	param.req_data_len = strlen(argv[4]);
-
+	param.con_num = 4;
+	param.rx_con_num = 2;
+	param.ops = &ops;
 	session_fd = arpc_client_create_session(&param);
 	if (!session_fd){
 		printf("arpc_client_create_session fail\n");
@@ -132,8 +420,8 @@ int main(int argc, char *argv[])
 		conver_hex_to_str(buf, sizeof(buf), buf_str, sizeof(buf_str));
 		printf("send data sha256:%s.\n", (char*)buf_str);
 
-		//ret = arpc_do_request(session_fd, requst, -1);
-		ret = arpc_send_oneway_msg(session_fd, &requst->send, NULL, NULL);
+		ret = arpc_do_request(session_fd, requst, -1);
+		//ret = arpc_send_oneway_msg(session_fd, &requst->send, NULL, NULL);
 		//usleep(500*1000);
 		if (ret != 0){
 			printf("arpc_do_request fail\n");

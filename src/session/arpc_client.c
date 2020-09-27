@@ -24,234 +24,17 @@
 #include "arpc_session.h"
 #include "arpc_request.h"
 #include "arpc_response.h"
-#include "arpc_process_rsp.h"
-#include "arpc_process_request.h"
-
-#ifdef 	_DEF_SESSION_CLIENT
-
-
-#define CLIENT_SESSION_CTX(ctx, session_fd, usr_ctx)	\
-struct arpc_client_ctx *ctx = NULL;\
-struct arpc_session_handle *session_fd = (struct arpc_session_handle *)usr_ctx;\
-do{\
-	if(session_fd && session_fd->ex_ctx)\
-		ctx = (struct arpc_client_ctx *)session_fd->ex_ctx;\
-}while(0);
-
-static int ow_msg_send_complete(struct xio_session *session, struct xio_msg *msg, void *conn_user_context);
-
-/* ################## struct ###################*/
-/* ################## function ###################*/
-
-static int session_event(struct xio_session *session,
-			    struct xio_session_event_data *event_data,
-			    void *cb_user_context)
-{
-	int ret = 0;
-	struct arpc_connection *con_ctx = NULL;
-	struct xio_connection_params xio_con_param;
-	SESSION_CTX(session_ctx, cb_user_context);
-
-	con_ctx = (struct arpc_connection *)event_data->conn_user_context;
-	ARPC_LOG_DEBUG("#### event:%d|%s. reason: %s.", event_data->event,
-					xio_session_event_str(event_data->event), 
-					xio_strerror(event_data->reason));
-	
-	switch (event_data->event) {
-		case XIO_SESSION_TEARDOWN_EVENT:
-			xio_session_destroy(session);
-			arpc_cond_lock(&session_ctx->cond);
-			if (session_ctx->is_close) {
-				ARPC_LOG_NOTICE(" user to tear down session.");
-				arpc_cond_notify_all(&session_ctx->cond);
-				arpc_cond_unlock(&session_ctx->cond);
-				break;
-			}
-			arpc_cond_unlock(&session_ctx->cond);
-			ARPC_LOG_NOTICE(" rebuild session!!!!!!!!!!.");
-			ret = rebuild_session(session_ctx);
-			LOG_ERROR_IF_VAL_TRUE(ret, "rebuild_session fail.");
-			break;
-		case XIO_SESSION_CONNECTION_ESTABLISHED_EVENT:
-			arpc_cond_lock(&con_ctx->cond);
-			if (event_data->conn != con_ctx->xio_con){
-				xio_connection_destroy(con_ctx->xio_con);
-				ARPC_LOG_ERROR("event_data->conn[%p], conn[%u][%p] not match!.", event_data->conn, con_ctx->id, con_ctx->xio_con);
-				con_ctx->xio_con = event_data->conn;
-			}
-			con_ctx->status = XIO_STA_RUN_ACTION;
-			con_ctx->client.recon_interval_s = 0;
-			con_ctx->is_busy = 0;
-			arpc_cond_notify(&con_ctx->cond);
-			ARPC_LOG_NOTICE(" build connection[%u][%p] success!.", con_ctx->id, event_data->conn);
-			arpc_cond_unlock(&con_ctx->cond);
-			break;
-		case XIO_SESSION_CONNECTION_TEARDOWN_EVENT: // conn断开，需要释放con资源
-			if (event_data->conn)
-				xio_connection_destroy(event_data->conn);
-			arpc_cond_lock(&con_ctx->cond);
-			if (con_ctx->status == XIO_STA_CLEANUP) {
-				ARPC_LOG_NOTICE("connection[%u][%p] tear down!.", con_ctx->id, event_data->conn);
-				con_ctx->xio_con = NULL;
-			}else{
-				ARPC_LOG_ERROR("some error, connection[%u][%p] tear down!.", con_ctx->id, event_data->conn);
-				(void)memset(&xio_con_param, 0, sizeof(struct xio_connection_params));
-				xio_con_param.session			= session_ctx->xio_s;
-				xio_con_param.ctx				= con_ctx->client.xio_con_ctx;
-				xio_con_param.conn_idx			= con_ctx->client.affinity;
-				xio_con_param.conn_user_context	= con_ctx;
-				con_ctx->xio_con = xio_connect(&xio_con_param);
-				con_ctx->status = XIO_STA_TEARDOWN;
-				con_ctx->client.recon_interval_s += 10;
-			}
-			arpc_cond_notify_all(&con_ctx->cond);
-			arpc_cond_unlock(&con_ctx->cond);
-			break;
-		case XIO_SESSION_REJECT_EVENT:
-		case XIO_SESSION_CONNECTION_REFUSED_EVENT: /**< connection refused event*/
-			arpc_cond_lock(&con_ctx->cond);
-			if (event_data->conn)
-				xio_connection_destroy(event_data->conn);
-			con_ctx->status = XIO_STA_RUN;
-			con_ctx->client.recon_interval_s += 10;
-			con_ctx->is_busy = 1;
-			arpc_cond_notify(&con_ctx->cond);
-			ARPC_LOG_NOTICE(" build connection[%u][%p] refused!.", con_ctx->id, event_data->conn);
-			arpc_cond_unlock(&con_ctx->cond);
-			break;
-		case XIO_SESSION_ERROR_EVENT:
-			break;
-		default:
-			break;
-	};
-	
-	return ret;
-}
-
-static int session_established(struct xio_session *session,
-				      			struct xio_new_session_rsp *rsp,
-				      			void *conn_user_context)
-{
-	ARPC_LOG_NOTICE("client session established, %p.", conn_user_context);
-	return 0;
-}
-
-static int msg_error(struct xio_session *session,
-			    enum xio_status error,
-			    enum xio_msg_direction dir,
-			    struct xio_msg  *rsp,
-			    void *conn_user_context)
-{
-	int ret = 0;
-	SESSION_CONN_CTX(conn, conn_user_context);
-	ARPC_LOG_ERROR("msg_error message,dir:%d, err:%d. ", dir, error);
-	switch(dir) {
-		case XIO_MSG_DIRECTION_OUT:
-			if(rsp->type == XIO_MSG_TYPE_ONE_WAY){
-				ow_msg_send_complete(session, rsp, conn_user_context);
-			}else if(rsp->type == XIO_MSG_TYPE_RSP) {
-				arpc_do_response_complete((struct arpc_common_msg *)rsp->user_context, conn);
-			}
-			break;
-		case XIO_MSG_DIRECTION_IN:
-			break; 
-		default:
-			break;
-	}
-	return 0;
-}
-
-static int _client_msg_header_dispatch(struct xio_session *session, struct xio_msg *msg, void *conn_user_context)
-{
-	int ret = 0;
-	SESSION_CONN_OPS_CTX(conn, conn_ops, conn_user_context);
-
-	ARPC_LOG_DEBUG("header message type:%d", msg->type);
-	switch(msg->type) {
-		case XIO_MSG_TYPE_REQ:
-			ret = process_request_header(conn, msg, &conn_ops->req_ops, IOV_DEFAULT_MAX_LEN, conn->usr_ops_ctx);
-			break;
-		case XIO_MSG_TYPE_RSP:
-			ret = process_rsp_header(msg, conn);
-			break;
-		case XIO_MSG_TYPE_ONE_WAY:
-			ret = process_oneway_header(msg, &conn_ops->oneway_ops, IOV_DEFAULT_MAX_LEN, conn->usr_ops_ctx);
-			break;  
-		default:
-			break;
-	}
-	return ret;
-}
-static int _client_msg_data_dispatch(struct xio_session *session,
-		       struct xio_msg *rsp,
-		       int last_in_rxq,
-		       void *conn_user_context)
-{
-	int ret = 0;
-	SESSION_CONN_OPS_CTX(conn, conn_ops, conn_user_context);
-
-	ARPC_LOG_DEBUG("msg_data_dispatch, msg type:%d", rsp->type);
-	switch(rsp->type) {
-		case XIO_MSG_TYPE_REQ:
-			ret = process_request_data(conn, rsp, &conn_ops->req_ops, last_in_rxq, conn->usr_ops_ctx);
-			break;
-		case XIO_MSG_TYPE_RSP:
-			ret = process_rsp_data(rsp, last_in_rxq, conn);
-			break;
-		case XIO_MSG_TYPE_ONE_WAY:
-			//ret = set_connection_rx_mode(conn);
-			//LOG_ERROR_IF_VAL_TRUE(ret, "set_connection_rx_mode fail.");
-			ret = process_oneway_data(rsp, &conn_ops->oneway_ops, last_in_rxq, conn->usr_ops_ctx);
-			break;
-		default:
-			break;
-	}
-
-	return ret;
-}
-
-static int arpc_rsp_send_complete(struct xio_session *session,
-				    struct xio_msg *rsp,
-				    void *conn_user_context)
-{
-	SESSION_CONN_CTX(conn, conn_user_context);
-	return arpc_do_response_complete((struct arpc_common_msg *)(rsp->user_context), conn);
-}
-
-static int on_msg_delivered(struct xio_session *session,
-				struct xio_msg *msg,
-				int last_in_rxq,
-				void *conn_user_context)
-{
-	struct arpc_common_msg *poneway_msg = (struct arpc_common_msg *)msg->user_context;
-	SESSION_CONN_CTX(conn, conn_user_context);
-
-	ARPC_LOG_DEBUG("************!!!!!!!!!on_msg_delivered, msg type:%d", msg->type);
-	LOG_THEN_RETURN_VAL_IF_TRUE((!poneway_msg), -1, "poneway_msg is empty.");
-
-	return arpc_oneway_send_complete(poneway_msg, conn);
-}
-
-static int ow_msg_send_complete(struct xio_session *session, struct xio_msg *msg, void *conn_user_context)
-{
-	struct arpc_common_msg *poneway_msg = (struct arpc_common_msg *)msg->user_context;
-	SESSION_CONN_CTX(conn, conn_user_context);
-
-	LOG_THEN_RETURN_VAL_IF_TRUE((!poneway_msg), -1, "poneway_msg is empty.");
-	ARPC_LOG_DEBUG("ow_msg_send_complete id:[%u], source addr[%p].", conn->id, poneway_msg);
-
-	return arpc_oneway_send_complete(poneway_msg, conn);
-}
+#include "arpc_xio_callback.h"
 
 static struct xio_session_ops x_client_ops = {
-	.on_session_event			=  &session_event,
-	.on_session_established		=  &session_established,
-	.rev_msg_data_alloc_buf		=  &_client_msg_header_dispatch,
-	.on_msg						=  &_client_msg_data_dispatch,
-	.on_msg_send_complete		=  &arpc_rsp_send_complete,
-	.on_msg_delivered			=  &on_msg_delivered,
-	.on_ow_msg_send_complete	=  &ow_msg_send_complete,
-	.on_msg_error				=  &msg_error
+	.on_session_event			=  &client_session_event,
+	.on_session_established		=  &client_session_established,
+	.rev_msg_data_alloc_buf		=  &msg_head_process,
+	.on_msg						=  &msg_data_process,
+	.on_msg_send_complete		=  &response_send_complete,
+	.on_msg_delivered			=  &msg_delivered,
+	.on_ow_msg_send_complete	=  &oneway_send_complete,
+	.on_msg_error				=  &message_error
 };
 
 arpc_session_handle_t arpc_client_create_session(const struct arpc_client_session_param *param)
@@ -304,11 +87,9 @@ arpc_session_handle_t arpc_client_create_session(const struct arpc_client_sessio
 	idle_thread_num = (idle_thread_num < ARPC_CLIENT_MAX_CON_NUM)? idle_thread_num: ARPC_CLIENT_MAX_CON_NUM;
 
 	rx_con_num = (param->rx_con_num > 1 )? param->rx_con_num: 1; //至少保留一个接收通道
-	//idle_thread_num = 10;
-	//rx_con_num = 5;
 	for (i = 0; i < idle_thread_num; i++) {
-		con = arpc_create_con(ARPC_CON_TYPE_CLIENT, session, i);
-		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!con, error_2, "arpc_create_xio_client_con fail.");
+		con = arpc_create_connection(ARPC_CON_TYPE_CLIENT, session, i);
+		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!con, error_2, "arpc_init_client_conn fail.");
 		ret = arpc_wait_connected(con, 20*1000);
 		LOG_ERROR_IF_VAL_TRUE(ret, "wait_connection_finished timeout, continue.");
 		if(rx_con_num){
@@ -348,4 +129,4 @@ enum arpc_session_status arpc_get_session_status(const arpc_session_handle_t fd)
 {
 	return ARPC_SESSION_STA_ACTIVE;
 }
-#endif
+

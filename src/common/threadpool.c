@@ -22,6 +22,8 @@
 #include <sys/time.h>
 #include <inttypes.h>
 #include <semaphore.h>
+#include <sys/sysinfo.h>
+#include <sys/prctl.h>
 
 #include "base_log.h"
 #include "threadpool.h"
@@ -103,6 +105,8 @@ static void *task_worker(void* arg) {
 	CPU_SET((pool_ctx->thread_num)%(pool_ctx->cpu_max_num), &cpuset);
 	pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset);
 
+	prctl(PR_SET_NAME, "share_thread");
+
 	TASK_SET_ACTIVE(t_msg->flag);
 	TP_LOG_DEBUG(" Eentry thread[%lu], init first.", t_msg->thread_id);
 	/* 线程同步*/
@@ -174,9 +178,13 @@ tp_handle tp_create_thread_pool(struct tp_param *p)
 	LOG_THEN_RETURN_VAL_IF_TRUE((!pool), NULL, "pool calloc fail.");
 
 	pool->thread_num = thread_num;
+	pool->cpu_max_num = get_nprocs();
+	TP_LOG_NOTICE("Get machine CPU num[%u].", pool->cpu_max_num);
 	if (p){
-		pool->cpu_max_num = (p->cpu_max_num >= 4)?p->cpu_max_num:16;
+		pool->cpu_max_num = (p->cpu_max_num >= 4)?p->cpu_max_num:pool->cpu_max_num;
 	}
+	TP_LOG_NOTICE("Set thread bind CPU num[%u].", pool->cpu_max_num);
+
 	pthread_mutex_init(&pool->mutex, NULL); /* 初始化互斥锁 */
 	pthread_cond_init(&pool->cond, NULL);	 /* 初始化条件变量 */
 

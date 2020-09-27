@@ -35,26 +35,16 @@ static int arpc_rx_request_rsp_head(struct arpc_common_msg *req_msg, struct arpc
 static int arpc_process_rsp_data(struct arpc_common_msg *req_msg, struct arpc_connection *con)
 {
 	int ret = ARPC_ERROR;
-
-	REQUEST_CTX(usr_msg, ex_msg, req_msg);
-
 	LOG_THEN_RETURN_VAL_IF_TRUE((!req_msg), ARPC_ERROR, "req_msg null.");
 	LOG_THEN_RETURN_VAL_IF_TRUE((!con), ARPC_ERROR, "con null.");
 
-	arpc_cond_lock(&req_msg->cond);	// to lock
-	MSG_CLR_REQ(ex_msg->flag);
-	MSG_SET_RSP(ex_msg->flag);
-	if (!usr_msg->proc_rsp_cb){
-		arpc_cond_notify(&req_msg->cond);// 通知
-		arpc_cond_unlock(&req_msg->cond);
-	}else{
-		ret = conver_msg_xio_to_arpc(&ex_msg->x_rsp_msg->in, &usr_msg->receive);
-		LOG_ERROR_IF_VAL_TRUE(ret, "conver_msg_xio_to_arpc fail.");
-		ret = usr_msg->proc_rsp_cb(&usr_msg->receive, usr_msg->receive_ctx);
-		LOG_ERROR_IF_VAL_TRUE(ret, "proc_rsp_cb fail.");
-		arpc_cond_unlock(&req_msg->cond);
-		arpc_destroy_common_msg(req_msg);	//un lock
-	}
+	//同步通知数据发送完成
+	ret = arpc_session_send_comp_notify(con, req_msg);
+	LOG_ERROR_IF_VAL_TRUE(ret, "arpc_session_send_comp_notify fail.");
+
+	ret = arpc_request_rsp_complete(req_msg);
+	LOG_ERROR_IF_VAL_TRUE(ret, "arpc_request_rsp_complete fail.");
+
 	return ret;	
 }
 
@@ -63,7 +53,7 @@ int process_rsp_header(struct xio_msg *rsp, struct arpc_connection *con)
 	struct arpc_common_msg *req_msg = (struct arpc_common_msg *)rsp->user_context;
 	REQUEST_USR_EX_CTX(ex_msg, req_msg);
 
-	LOG_THEN_RETURN_VAL_IF_TRUE((req_msg->magic == ARPC_COM_MSG_MAGIC), ARPC_ERROR, "magic[%x] bot match.", req_msg->magic);
+	LOG_THEN_RETURN_VAL_IF_TRUE((req_msg->magic != ARPC_COM_MSG_MAGIC), ARPC_ERROR, "magic[%x] not match.", req_msg->magic);
 	ex_msg->x_rsp_msg = rsp;
 	return arpc_rx_request_rsp_head(req_msg, con);
 }
@@ -74,7 +64,7 @@ int process_rsp_data(struct xio_msg *rsp, int last_in_rxq, struct arpc_connectio
 	REQUEST_USR_EX_CTX(ex_msg, req_msg);
 
 	ex_msg->x_rsp_msg = rsp;
-	LOG_THEN_RETURN_VAL_IF_TRUE((req_msg->magic == ARPC_COM_MSG_MAGIC), ARPC_ERROR, "magic[%x] bot match.", req_msg->magic);
+	LOG_THEN_RETURN_VAL_IF_TRUE((req_msg->magic != ARPC_COM_MSG_MAGIC), ARPC_ERROR, "magic[%x] not match.", req_msg->magic);
 	return arpc_process_rsp_data(req_msg, con);
 }
 

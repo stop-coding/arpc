@@ -45,9 +45,9 @@ extern "C" {
 
 #define ARPC_ASSERT(condition, format, arg...) BASE_ASSERT(condition, format, ##arg)
 
-#define URI_MAX_LEN 256
+#define URI_MAX_LEN 	256
 #define MAX_DATA_SEG_LEN 1024
-#define DEFAULT_DEPTH 4
+#define DEFAULT_DEPTH 	4
 
 #define RETRY_MAX_TIME	10	/* session断开自动重连次数*/
 #define SERVER_DOWN_WAIT_TIME		10
@@ -56,6 +56,7 @@ extern "C" {
 #define SET_FLAG(flag, tag) flag=(flag|(1<<tag))
 #define CLR_FLAG(flag, tag) flag=(flag&~(1<<tag))
 
+// 消息状态标志
 #define XIO_MSG_REQ 			1
 #define XIO_MSG_RSP 			2
 #define XIO_MSG_CANCEL 			3
@@ -251,7 +252,7 @@ inline static int arpc_cond_destroy(struct arpc_cond *cond)
 #define FLAG_MSG_ERROR_DISCARD_DATA 7
 
 // 最小空闲的线程数
-#define ARPC_MIN_THREAD_IDLE_NUM    3
+#define ARPC_MIN_THREAD_IDLE_NUM    4
 
 struct async_proc_ops{
 	void* (*alloc_cb)(uint32_t size, void* usr_context);
@@ -299,14 +300,20 @@ struct arpc_thread_param{
 };
 
 #define ARPC_COM_MSG_MAGIC 0xfa577
+enum  arpc_msg_type{
+	ARPC_MSG_TYPE_REQ,
+	ARPC_MSG_TYPE_RSP,
+	ARPC_MSG_TYPE_OW,
+};
 
 struct arpc_common_msg {
 	QUEUE 						q;
 	uint32_t					magic;
+	enum	arpc_msg_type		type;
 	struct arpc_cond 			cond;				
 	struct arpc_connection		*conn;
 	struct xio_msg				*tx_msg;
-	uint32_t 					need_free;
+	uint32_t 					retry_cnt;
     uint32_t                    flag;
 	void 		                *usr_context;				/*! @brief 用户上下文 */
     char                        ex_data[0];
@@ -324,6 +331,7 @@ int arpc_destroy_common_msg(struct arpc_common_msg *msg);
 int get_uri(const struct arpc_con_info *param, char *uri, uint32_t uri_len);
 void* arpc_get_threadpool();
 uint32_t arpc_thread_max_num();
+uint32_t arpc_cpu_max_num();
 int arpc_get_ipv4_addr(struct sockaddr_storage *src_addr, char *ip, uint32_t len, uint32_t *port);
 
 // others
@@ -331,11 +339,8 @@ void debug_printf_msg(struct xio_msg *rsp);
 int post_to_async_thread(struct arpc_thread_param *param);
 
 int create_xio_msg_usr_buf(struct xio_msg *msg, struct proc_header_func *ops, uint64_t iov_max_len, void *usr_ctx);
-int destroy_xio_msg_usr_buf(struct xio_msg *msg, mem_free_cb_t free_cb, void *usr_ctx);
+int destroy_xio_msg_usr_buf(struct arpc_vmsg *rev_iov, mem_free_cb_t free_cb, void *usr_ctx);
 
-// oneway
-int process_oneway_header(struct xio_msg *msg, struct oneway_ops *ops, uint64_t iov_max_len, void *usr_ctx);
-int process_oneway_data(struct xio_msg *req, struct oneway_ops *ops, int last_in_rxq, void *usr_ctx);
 
 #ifdef __cplusplus
 }

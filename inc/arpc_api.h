@@ -121,8 +121,8 @@ struct arpc_header_msg{
 enum arpc_vec_type {
 	ARPC_VEC_TYPE_PRT = 0,									/*! @brief 自定义指针，用户分配vec结构体 */
 	ARPC_VEC_TYPE_ARR,										/*! @brief 数组，默认为ARPC_VEC_MAX_NUM定义的数量*/
-	ARPC_VEC_TYPE_INTER,									/*! @brief 内部vec指针*/
-	ARPC_VEC_TYPE_NONE,										/*! @brief 内部vec指针*/
+	ARPC_VEC_TYPE_INTER,									/*! @brief XIO内部vec指针*/
+	ARPC_VEC_TYPE_NONE,										/*! @brief */
 };
 /**
  * @brief  arpc基础消息结构
