@@ -148,6 +148,12 @@ struct xio_context *xio_context_create(struct xio_context_params *ctx_params,
                 ctx->register_internal_mempool =
                         !!ctx_params->register_internal_mempool;
 		ctx->rq_depth = ctx_params->rq_depth;
+		ctx->max_inline_xio_data = (ctx_params->max_inline_xio_data)?
+									ctx_params->max_inline_xio_data:
+									g_options.max_inline_xio_data;
+		ctx->max_inline_xio_hdr = ctx_params->max_inline_xio_hdr?
+								  ctx_params->max_inline_xio_hdr:
+								  g_options.max_inline_xio_hdr;
 	}
 	if (!ctx->max_conns_per_ctx)
 		ctx->max_conns_per_ctx = 100;

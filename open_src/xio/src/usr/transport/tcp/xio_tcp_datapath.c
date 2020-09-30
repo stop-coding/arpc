@@ -691,7 +691,7 @@ static int xio_tcp_prep_req_out_data(
 			      ulp_imm_len + xio_max_hdr_len) <=
 			     tcp_hndl->max_inline_buf_sz) &&
 			     (((int)(ulp_imm_len) <=
-			       g_options.max_inline_xio_data) ||
+			       tcp_hndl->max_inline_buf_sz) ||
 			      ulp_imm_len == 0));
 
 	/* the data is outgoing via SEND */

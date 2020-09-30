@@ -121,28 +121,11 @@ int conver_msg_arpc_to_xio(const struct arpc_vmsg *usr_msg, struct xio_vmsg	*xio
 {
 	uint32_t i;
 	/* header */
-	LOG_THEN_RETURN_VAL_IF_TRUE((!usr_msg->head || !usr_msg->head_len 
-								|| usr_msg->head_len > MAX_HEADER_DATA_LEN), 
-								-1, "msg head is invalid, header:%p, len:%u.", 
-								usr_msg->head, 
-								usr_msg->head_len);
-	
 	xio_msg->header.iov_base = usr_msg->head;
 	xio_msg->header.iov_len = usr_msg->head_len;
-	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(xio_msg->header.iov_len > MAX_HEADER_DATA_LEN, 
-								data_null, 
-								"header len[%lu] is over max limit[%u].",
-								xio_msg->header.iov_len,
-								MAX_HEADER_DATA_LEN);
-	/* data */
-	xio_msg->sgl_type	   = XIO_SGL_TYPE_IOV_PTR;
-	LOG_THEN_GOTO_TAG_IF_VAL_TRUE((usr_msg->total_data > DATA_DEFAULT_MAX_LEN), data_null, 
-									"send total_data[%lu] is over max size[%lu].",
-									usr_msg->total_data,
-									(uint64_t)DATA_DEFAULT_MAX_LEN);
-
 	xio_msg->pdata_iov.max_nents = usr_msg->vec_num;
 	xio_msg->pdata_iov.nents = usr_msg->vec_num;
+	xio_msg->total_data_len = 0;
 	if (xio_msg->pdata_iov.nents) {
 		xio_msg->pdata_iov.sglist = (struct xio_iovec_ex *)ARPC_MEM_ALLOC( usr_msg->vec_num * sizeof(struct xio_iovec_ex), NULL);
 		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!xio_msg->pdata_iov.sglist, data_null, "ARPC_MEM_ALLOC fail.");
@@ -156,7 +139,9 @@ int conver_msg_arpc_to_xio(const struct arpc_vmsg *usr_msg, struct xio_vmsg	*xio
 											IOV_DEFAULT_MAX_LEN);
 			xio_msg->pdata_iov.sglist[i].iov_base = usr_msg->vec[i].data;
 			xio_msg->pdata_iov.sglist[i].iov_len = usr_msg->vec[i].len;
+			xio_msg->total_data_len += xio_msg->pdata_iov.sglist[i].iov_len;
 		}
+		assert(xio_msg->total_data_len <= DATA_DEFAULT_MAX_LEN);
 	}else{
 		xio_msg->sgl_type = XIO_SGL_TYPE_IOV;
 		xio_msg->data_iov.nents = 0;

@@ -35,8 +35,15 @@ typedef void* arpc_server_t;						/*! @brief server */
 #define _DEF_SESSION_CLIENT
 
 struct aprc_option{
-	uint32_t thread_max_num;	/*! @brief 最大工作线程数，同一个线程池管理 */
-	uint32_t  cpu_max_num;		/*! @brief cpu核心数，用于线程绑定 */
+	uint32_t  thread_max_num;		/*! @brief 最大工作线程数，同一个线程池管理 */
+	uint32_t  cpu_max_num;			/*! @brief cpu核心数，用于线程绑定 */
+	uint32_t  msg_head_max_len; 	/*! @brief 每条消息的head最大长度，[128, 1024]，默认256 */
+	uint64_t  msg_data_max_len; 	/*! @brief 每条消息的数据最大长度 ，[1k, 2*1024k] 默认1k，samba读写至少需要1M*/
+	uint32_t  msg_iov_max_len;		/*! @brief IOV最大长度 ，[1024, 8*1024k] 默认1k，pfile需要设置为4k*/
+	uint32_t  tx_queue_max_depth;  	/*! @brief  发送消息缓冲队列深度度[64, 1024]， 512*/
+	uint64_t  tx_queue_max_size;    /*! @brief 发送消息缓冲队列buf大小，单位B, 默认64M*/
+	uint32_t  rx_queue_max_depth;  	/*! @brief  接收消息缓冲队列深度度[64, 1024], 默认512*/
+	uint64_t  rx_queue_max_size;    /*! @brief 接收消息缓冲队列buf大小，单位B， 默认64M, 消息长度越大，该值也越大，否则会经常发送失败*/
 };
 
 /*!
@@ -66,7 +73,6 @@ int arpc_init();
  * @return  void; 
  */
 void arpc_finish();
-
 
 enum arpc_trans_type {
 	ARPC_E_TRANS_TCP = 0,
@@ -249,11 +255,11 @@ struct arpc_session_ops {
 
 
 
-#define PRIVATE_HANDLE	char handle[0]						/*! @brief 私用数据段声明 */
+#define PRIVATE_HANDLE	char handle[0]					/*! @brief 私用数据段声明 */
 
-#define MAX_HEADER_DATA_LEN   (1024)						/*! @brief 消息体头部最大长度 */
-#define DATA_DEFAULT_MAX_LEN  (512*1024)					/*! @brief 消息体数据段最大长度 1024*1024*/
-#define IOV_DEFAULT_MAX_LEN   (4*1024)						/*! @brief 数据每个IOV最长长度 4*1024*/
+#define MAX_HEADER_DATA_LEN   (512)						/*! @brief 消息体头部最大长度 */
+#define DATA_DEFAULT_MAX_LEN  (4*1024)					/*! @brief 消息体数据段最大长度 1024*1024*/
+#define IOV_DEFAULT_MAX_LEN   (1024)					/*! @brief 数据每个IOV最长长度 4*1024*/
 #define IOV_MAX_DEPTH (DATA_DEFAULT_MAX_LEN/IOV_DEFAULT_MAX_LEN) /*! @brief 数据每个IOV_MAX_DEPTH*/
 /**
  * @brief  session消息体实例化参数
@@ -373,6 +379,31 @@ typedef int (*rsp_cb_t)(struct arpc_vmsg *rsp_iov, void* rsp_cb_ctx);
  */
 int arpc_do_response(arpc_rsp_handle_t *rsp_fd, struct arpc_vmsg *rsp_iov, rsp_cb_t release_rsp_cb, void* rsp_cb_ctx);
 
+
+/*! 
+ * @brief 设置session通信参数
+ * 
+ * 可以根据session场景设置通信参数，可选，若为0，则使用初始设置的参数
+ * 
+ */
+struct aprc_session_opt{
+	uint32_t  msg_head_max_len; 	/*! @brief 每条消息的head最大长度，[128, 1024]，默认256 */
+	uint64_t  msg_data_max_len; 	/*! @brief 每条消息的数据最大长度 ，[1k, 2*1024k] 默认1k，samba读写至少需要1M*/
+	uint32_t  msg_iov_max_len;		/*! @brief IOV最大长度 ，[1024, 8*1024k] 默认1k，pfile需要设置为4k*/
+};
+
+
+/*! 
+ * @brief 设置session通信参数
+ * 
+ * 可以根据session场景设置通信参数，可选，若为0，则使用初始设置的参数
+ * 
+ * @param[in] ses ,a rsp msg handle pointer, 由接收到消息回复时获取
+ * @param[in] opt ,回复的消息
+ * @return int .0,表示发送成功, ; 小于0则失败
+ */
+int arpc_get_session_opt(const arpc_session_handle_t *ses, struct aprc_session_opt *opt);
+
 /**********************************************************************************************
  * @name client
  * @brif clien 客户端
@@ -395,6 +426,7 @@ struct arpc_client_session_param {
 	void 						*ops_usr_ctx;						/*! @brief 调用者的上下文参数，用于操作函数入参 */
 	uint32_t					req_data_len;						/*! @brief 申请session时的数据 */
 	void						*req_data;							/*! @brief 调用者新建session请求时，发给服务端数据 */
+	struct aprc_session_opt		opt;
 };
 
 #define ARPC_CLIENT_MAX_CON_NUM 16
@@ -499,7 +531,7 @@ struct arpc_server_param {
 	struct arpc_con_info 	   		con;
 	
 	/*! @brief 工作线程数，用于并发，如果为0则使用默认值1，则只有一个主线程 */
-	int32_t 	   		work_num;
+	int32_t 	   					work_num;
 
 	/*! @brief 收到申请建立session请求时回调，用于处理调用者逻辑和输出回复消息*/
 	int (*new_session_start)(const struct arpc_new_session_req *, struct arpc_new_session_rsp *, void *server_ctx);
@@ -521,6 +553,9 @@ struct arpc_server_param {
 
 	/*! @brief IOV数据深度 选填，默认为4*1024*/
 	uint32_t						iov_max_len;
+
+	/*! @brief session 配置参数，可选，用于资源和性能优化*/
+	struct aprc_session_opt		opt;
 };
 
 /*!

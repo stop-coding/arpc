@@ -238,25 +238,6 @@ int session_get_conn(struct arpc_session_handle *s, struct arpc_connection **pco
 		QUEUE_INSERT_TAIL(&s->q_con, &con->q);
 	}
 	arpc_cond_unlock(&s->cond);
-	//流控
-	/*if (con) {
-		gettimeofday(&now, NULL);	// 线程安全
-		arpc_rwlock_wrlock(&con->rwlock);
-		if((con->aceess_cnt >= g_access_max_cnt) 
-			&& (now.tv_usec < con->access_time.tv_usec + (ACCESS_CON_INTERVAL_TIME_MS*1000)) 
-			&& (con->access_time.tv_sec == now.tv_sec)){
-			con->aceess_cnt = con->aceess_cnt*(1000/((now.tv_usec - con->access_time.tv_usec)/1000));
-			ARPC_LOG_ERROR("warning: conn[%u][%p] overload. cur ops[%u/s], wait time [%d] ms.",con->id, con, con->aceess_cnt, ACCESS_CON_WAIT_TIME_MS);
-			con->aceess_cnt = 0;
-			arpc_rwlock_unlock(&con->rwlock);
-			arpc_usleep(ACCESS_CON_WAIT_TIME_MS *1000);
-			arpc_rwlock_wrlock(&con->rwlock);
-		}
-		con->access_time = now;
-		con->aceess_cnt++;
-		arpc_rwlock_unlock(&con->rwlock);
-	}*/
-
 	return (con)?0:-1;
 }
 
@@ -333,9 +314,13 @@ static int arpc_init_client_conn(struct arpc_connection *con, struct arpc_sessio
 	struct xio_connection_params xio_con_param;
 	work_handle_t hd;
 	struct tp_thread_work thread;
+	struct xio_context_params ctx_params;
 
 	LOG_THEN_RETURN_VAL_IF_TRUE(!con, -1, "arpc_new_connection fail.");
 	con->client.affinity = index + 1;
+	(void)memset(&ctx_params, 0, sizeof(struct xio_context_params));
+	ctx_params.max_inline_xio_data = s->msg_data_max_len;
+	ctx_params.max_inline_xio_hdr = s->msg_head_max_len;
 	con->xio_con_ctx = xio_context_create(NULL, 0, con->client.affinity);
 	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!con->xio_con_ctx, free_con, "xio_context_create fail.");
 	(void)memset(&xio_con_param, 0, sizeof(struct xio_connection_params));
@@ -414,6 +399,9 @@ struct arpc_connection *arpc_create_connection(enum arpc_connection_type type,
 	con->session = s;
 	con->usr_ops_ctx = s->usr_context;
 	con->ops = &s->ops;
+	con->msg_iov_max_len = s->msg_iov_max_len;
+	con->msg_data_max_len = s->msg_data_max_len;
+	con->msg_head_max_len = s->msg_head_max_len;
 
 	ret = session_insert_con(s, con);
 	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, free_con, "session[%p] insert con[%u][%p] fail.", s, con->id, con);
@@ -585,7 +573,7 @@ static void arpc_tx_event_callback(int fd, int events, void *data)
 			con->tx_msg_num--;
 			continue;
 		}
-
+		
 		switch (msg->type)
 		{
 			case ARPC_MSG_TYPE_REQ:
@@ -700,7 +688,7 @@ int arpc_destroy_server(struct arpc_server_handle* svr)
 }
 
 struct arpc_work_handle *arpc_create_xio_server_work(const struct arpc_con_info *con_param, 
-													void *threadpool, 
+													struct arpc_server_handle* server, 
 													struct xio_session_ops *work_ops,
 													uint32_t index)
 {
@@ -708,11 +696,17 @@ struct arpc_work_handle *arpc_create_xio_server_work(const struct arpc_con_info 
 	int ret;
 	work_handle_t hd;
 	struct tp_thread_work thread;
+	struct xio_context_params ctx_params;
 
 	work = arpc_create_work();
 	LOG_THEN_RETURN_VAL_IF_TRUE(!work, NULL, "arpc_create_work fail.");
 	work->affinity = index + 1;
-	work->work_ctx = xio_context_create(NULL, 0, work->affinity);
+
+	(void)memset(&ctx_params, 0, sizeof(struct xio_context_params));
+	ctx_params.max_inline_xio_data = server->msg_data_max_len;
+	ctx_params.max_inline_xio_hdr = server->msg_head_max_len;
+
+	work->work_ctx = xio_context_create(&ctx_params, 0, work->affinity);
 	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!work->work_ctx, free_work, "xio_context_create fail.");
 
 	ret = get_uri(con_param, work->uri, URI_MAX_LEN);
@@ -727,7 +721,7 @@ struct arpc_work_handle *arpc_create_xio_server_work(const struct arpc_con_info 
 	thread.loop = &xio_server_work_run;
 	thread.stop = &xio_server_work_stop;
 	thread.usr_ctx = (void*)work;
-	work->thread_handle = tp_post_one_work(threadpool, &thread, WORK_DONE_AUTO_FREE);
+	work->thread_handle = tp_post_one_work(server->threadpool, &thread, WORK_DONE_AUTO_FREE);
 	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!work->thread_handle, free_cond, "tp_post_one_work fail.");
 
 	ret = arpc_cond_wait_timeout(&work->cond, WAIT_THREAD_RUNING_TIMEOUT);
@@ -917,7 +911,41 @@ static void xio_server_work_stop(void * ctx)
 		xio_context_stop_loop(work->work_ctx);
 	return;
 }
+int check_xio_msg_valid(const struct arpc_connection *conn, const struct xio_vmsg *pmsg)
+{
+	uint32_t iov_depth = 0;
+	uint32_t nents = 0;
+	LOG_THEN_RETURN_VAL_IF_TRUE(!pmsg, ARPC_ERROR, "tx_msg null.");
+	
+	if(pmsg->header.iov_len && !pmsg->header.iov_base){
+		ARPC_LOG_ERROR("header invalid, iov_len:%lu, iov_base:%p", 
+						pmsg->header.iov_len, 
+						pmsg->header.iov_base);
+		return -1;
+	}
 
+	if(pmsg->header.iov_len > conn->msg_head_max_len){
+		ARPC_LOG_ERROR("header len over limit, iov_len:%lu, max:%u.", 
+						pmsg->header.iov_len, 
+						conn->msg_head_max_len);
+		return -1;
+	}
+
+	if (pmsg->total_data_len) {
+		LOG_THEN_RETURN_VAL_IF_TRUE((conn->msg_data_max_len < pmsg->total_data_len), -1, 
+									"data depth over limit, nents:%lu, max:%lu.", 
+									pmsg->total_data_len, 
+									conn->msg_data_max_len);
+	}	
+	nents = vmsg_sglist_nents(pmsg);
+	if(nents > (conn->msg_data_max_len/conn->msg_iov_max_len)){
+		ARPC_LOG_ERROR("data depth over limit, nents:%u, max:%lu.", 
+						nents, 
+						(conn->msg_data_max_len/conn->msg_iov_max_len));
+		return -1;
+	}
+	return 0;
+}
 int arpc_session_async_send(struct arpc_connection *conn, struct arpc_common_msg  *msg)
 {
 	int ret;
@@ -927,6 +955,9 @@ int arpc_session_async_send(struct arpc_connection *conn, struct arpc_common_msg
 	ret = arpc_cond_lock(&conn->cond);
 	LOG_THEN_RETURN_VAL_IF_TRUE(ret, ARPC_ERROR, "arpc_cond_lock conn[%u][%p] fail.", conn->id, conn);
 	LOG_THEN_GOTO_TAG_IF_VAL_TRUE((conn->status != XIO_STA_RUN_ACTION), unlock, "connoection on cleaning up");
+
+	ret = check_xio_msg_valid(conn, &msg->tx_msg->out);
+	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, unlock, "check msg invalid.");
 
 	while((conn->tx_msg_num > ARPC_CONN_TX_MAX_DEPTH) && (conn->status == XIO_STA_RUN_ACTION)){
 		ARPC_LOG_NOTICE("con is busy, tx_msg_num[%lu] wait release,", conn->tx_msg_num);
@@ -943,6 +974,7 @@ int arpc_session_async_send(struct arpc_connection *conn, struct arpc_common_msg
 	conn->tx_msg_num++;
 	QUEUE_INIT(&msg->q);
 	QUEUE_INSERT_TAIL(&conn->q_tx_msg, &msg->q);
+	msg->ref++;//引用计数
 	//ARPC_LOG_NOTICE("insert msg[%p].............", msg);
 	ret = write(conn->pipe_fd[1], pipe_magic, sizeof(pipe_magic));//触发发送事件
 	LOG_ERROR_IF_VAL_TRUE(ret < 0, "ret[%d], write fd[%d] fail", ret, conn->pipe_fd[1]);
@@ -967,6 +999,7 @@ int arpc_session_send_comp_notify(struct arpc_connection *conn, struct arpc_comm
 	if(!ret){
 		QUEUE_REMOVE(&msg->q);
 		QUEUE_INIT(&msg->q);
+		msg->ref--;
 		arpc_cond_unlock(&msg->cond);
 	}else{
 		ARPC_LOG_ERROR(" lock msg fail, maybe free...");
@@ -980,4 +1013,15 @@ int arpc_session_send_comp_notify(struct arpc_connection *conn, struct arpc_comm
 unlock:
 	arpc_cond_unlock(&conn->cond);
 	return -1;
+}
+
+int arpc_get_session_opt(const arpc_session_handle_t *ses, struct aprc_session_opt *opt)
+{
+	struct arpc_session_handle *s = (struct arpc_session_handle *)ses;
+	LOG_THEN_RETURN_VAL_IF_TRUE(!ses, ARPC_ERROR, "ses null.");
+	LOG_THEN_RETURN_VAL_IF_TRUE(!opt, ARPC_ERROR, "opt null.");
+	opt->msg_data_max_len = s->msg_data_max_len;
+	opt->msg_head_max_len = s->msg_head_max_len;
+	opt->msg_iov_max_len = s->msg_iov_max_len;
+	return 0;
 }

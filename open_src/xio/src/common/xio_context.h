@@ -127,6 +127,8 @@ struct xio_context {
 	int				max_conns_per_ctx;
 	int				rq_depth;
 	int				pad;
+	uint32_t		max_inline_xio_hdr;
+	uint64_t		max_inline_xio_data;
 #ifdef XIO_THREAD_SAFE_DEBUG
 	int                             nptrs;
 	int				pad1;

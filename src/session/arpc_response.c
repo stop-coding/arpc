@@ -101,11 +101,11 @@ int arpc_init_response(struct arpc_common_msg *rsp_fd)
 			}
 			rsp_msg->out.pdata_iov.max_nents = rsp_iov->vec_num;
 			vmsg_sglist_set_nents(&rsp_msg->out, rsp_iov->vec_num);
+			SET_FLAG(rsp_msg->usr_flags, XIO_MSG_FLAG_ALLOC_IOV_MEM);
 		}else{
 			rsp_msg->out.pdata_iov.max_nents = 0;
 			vmsg_sglist_set_nents(&rsp_msg->out, 0);
 		}
-		SET_FLAG(rsp_msg->usr_flags, FLAG_RSP_USER_DATA);
 		goto rsp;
 	}else{
 		ARPC_LOG_ERROR("response is empty, no head and data.");
@@ -115,7 +115,7 @@ rsp_default:
 	rsp_msg->out.header.iov_len  = 0;
 	rsp_msg->out.sgl_type = XIO_SGL_TYPE_IOV;
 	vmsg_sglist_set_nents(&rsp_msg->out, 0);
-	CLR_FLAG(rsp_msg->usr_flags, FLAG_RSP_USER_DATA);
+	CLR_FLAG(rsp_msg->usr_flags, XIO_MSG_FLAG_ALLOC_IOV_MEM);
 rsp:	
 	rsp_msg->request = rsp_fd_ex->x_rsp_msg;
 	rsp_msg->user_context = (void*)rsp_fd;
@@ -127,6 +127,7 @@ int arpc_send_response_complete(struct arpc_common_msg *rsp_fd)
 {
 	int ret;
 	struct arpc_rsp_handle *rsp_fd_ex;
+	struct xio_msg  	*rsp_msg;
 	LOG_THEN_RETURN_VAL_IF_TRUE(!rsp_fd, ARPC_ERROR, "rsp_fd IS NULL");
 
 	ret = arpc_cond_lock(&rsp_fd->cond);
@@ -135,6 +136,10 @@ int arpc_send_response_complete(struct arpc_common_msg *rsp_fd)
 	rsp_fd_ex = (struct arpc_rsp_handle*)rsp_fd->ex_data;
 	if (rsp_fd_ex->release_rsp_cb && rsp_fd_ex->rsp_usr_iov) {
 		rsp_fd_ex->release_rsp_cb(rsp_fd_ex->rsp_usr_iov, rsp_fd_ex->rsp_usr_ctx);
+	}
+	rsp_msg = &rsp_fd_ex->x_req_msg;
+	if(IS_SET(rsp_msg->usr_flags, XIO_MSG_FLAG_ALLOC_IOV_MEM) && rsp_msg->out.pdata_iov.sglist){
+		SAFE_FREE_MEM(rsp_msg->out.pdata_iov.sglist);
 	}
 	ret = arpc_cond_unlock(&rsp_fd->cond);
 	arpc_destroy_common_msg(rsp_fd);

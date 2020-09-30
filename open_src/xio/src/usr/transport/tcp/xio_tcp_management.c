@@ -863,6 +863,10 @@ struct xio_tcp_transport *xio_tcp_transport_create(
 
 	/* from now on don't allow changes */
 	tcp_hndl->max_inline_buf_sz	= xio_tcp_get_inline_buffer_size();
+	if((ctx->max_inline_xio_data > 0 && ctx->max_inline_xio_data < tcp_hndl->max_inline_buf_sz)) {
+		tcp_hndl->max_inline_buf_sz =  ctx->max_inline_xio_data;
+		ERROR_LOG("set tcp max_data_len:%lu", tcp_hndl->max_inline_buf_sz);
+	}
 	tcp_hndl->membuf_sz		= tcp_hndl->max_inline_buf_sz;
 
 	if (observer)

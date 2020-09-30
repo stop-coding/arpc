@@ -168,6 +168,8 @@ struct xio_tcp_options {
 	int			tcp_so_rcvbuf;
 	int			tcp_dual_sock;
 	int			pad;
+	uint32_t	max_inline_xio_hdr;
+	uint64_t	max_inline_xio_data;
 };
 
 #define XIO_TCP_REQ_HEADER_VERSION	1

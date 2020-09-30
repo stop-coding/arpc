@@ -175,6 +175,10 @@ int server_on_new_session(struct xio_session *session,struct xio_new_session_req
 		new_session->ops = server_fd->ops;
 	}
 
+	new_session->msg_data_max_len = server_fd->msg_data_max_len;
+	new_session->msg_head_max_len = server_fd->msg_head_max_len;
+	new_session->msg_iov_max_len = server_fd->msg_iov_max_len;
+
 	attr.ses_ops = NULL;
 	attr.uri = NULL;
 	attr.user_context = (void*)new_session;
@@ -269,6 +273,10 @@ int client_session_event(struct xio_session *session, struct xio_session_event_d
 			arpc_cond_notify(&con_ctx->cond);
 			ARPC_LOG_NOTICE(" build connection[%u][%p] success!.", con_ctx->id, event_data->conn);
 			arpc_cond_unlock(&con_ctx->cond);
+			// 通知session
+			arpc_cond_lock(&session_ctx->cond);
+			arpc_cond_notify_all(&session_ctx->cond);
+			arpc_cond_unlock(&session_ctx->cond);
 			break;
 		case XIO_SESSION_CONNECTION_TEARDOWN_EVENT: // conn断开，需要释放con资源
 			if (event_data->conn)
@@ -295,18 +303,27 @@ int client_session_event(struct xio_session *session, struct xio_session_event_d
 			}
 			arpc_cond_notify_all(&con_ctx->cond);
 			arpc_cond_unlock(&con_ctx->cond);
+			// 通知session
+			arpc_cond_lock(&session_ctx->cond);
+			arpc_cond_notify_all(&session_ctx->cond);
+			arpc_cond_unlock(&session_ctx->cond);
+
 			break;
 		case XIO_SESSION_REJECT_EVENT:
 		case XIO_SESSION_CONNECTION_REFUSED_EVENT: /**< connection refused event*/
 			arpc_cond_lock(&con_ctx->cond);
 			if (event_data->conn)
 				xio_connection_destroy(event_data->conn);
-			con_ctx->status = XIO_STA_RUN;
+			con_ctx->status = XIO_STA_TEARDOWN;
 			con_ctx->client.recon_interval_s += 10;
 			con_ctx->is_busy = 1;
 			arpc_cond_notify(&con_ctx->cond);
 			ARPC_LOG_NOTICE(" build connection[%u][%p] refused!.", con_ctx->id, event_data->conn);
 			arpc_cond_unlock(&con_ctx->cond);
+			// 通知session
+			arpc_cond_lock(&session_ctx->cond);
+			arpc_cond_notify_all(&session_ctx->cond);
+			arpc_cond_unlock(&session_ctx->cond);
 			break;
 		case XIO_SESSION_ERROR_EVENT:
 			break;
@@ -321,7 +338,6 @@ int msg_head_process(struct xio_session *session, struct xio_msg *msg, void *con
 {
 	int ret = 0;
 	SESSION_CONN_OPS_CTX(conn, conn_ops, conn_context);
-
 	ARPC_LOG_DEBUG("header message type:%d", msg->type);
 	switch(msg->type) {
 		case XIO_MSG_TYPE_REQ:
@@ -345,6 +361,10 @@ int msg_data_process(struct xio_session *session,struct xio_msg *msg, int last_i
 	SESSION_CONN_OPS_CTX(conn, conn_ops, conn_context);
 
 	ARPC_LOG_DEBUG("msg_data_dispatch, msg type:%d", msg->type);
+
+	ret = check_xio_msg_valid(conn, &msg->in);
+	LOG_THEN_RETURN_VAL_IF_TRUE(ret, -1, "check_xio_msg_valid fail.");
+
 	switch(msg->type) {
 		case XIO_MSG_TYPE_REQ:
 			ret = process_request_data(conn, msg, &conn_ops->req_ops, last_in_rxq, conn->usr_ops_ctx);

@@ -62,9 +62,17 @@ arpc_server_t arpc_server_create(const struct arpc_server_param *param)
 	req_ops = &server->ops.req_ops;
 	LOG_THEN_GOTO_TAG_IF_VAL_TRUE((!req_ops->proc_head_cb || !req_ops->proc_data_cb), error_1, "proc_data_cb is null.");
 
-	server->iov_max_len = (param->iov_max_len > 512) ? param->iov_max_len:server->iov_max_len;
-
 	con_param = param->con;
+	server->msg_iov_max_len  = (param->iov_max_len && param->iov_max_len <= (4*1024))?
+								param->iov_max_len:
+								(4*1024);
+	server->msg_data_max_len = (param->opt.msg_data_max_len && 
+								param->opt.msg_data_max_len <= (4*1024*1024))?
+								param->opt.msg_data_max_len:
+								(1024*1024);
+	server->msg_head_max_len = (param->opt.msg_head_max_len && param->opt.msg_head_max_len <= (1024))?
+								param->opt.msg_head_max_len:
+								(512);
 
 	ret = get_uri(&con_param, server->uri, URI_MAX_LEN);
 	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, error_1, "arpc_create_server fail");
@@ -74,7 +82,7 @@ arpc_server_t arpc_server_create(const struct arpc_server_param *param)
 	work_num = (param->work_num && param->work_num <= work_num)? param->work_num : 2; // 默认只有1个主线程,2个工作线程
 	for (i = 0; i < work_num; i++) {
 		con_param.ipv4.port++; // 端口递增
-		work_handle = arpc_create_xio_server_work(&con_param, server->threadpool, &x_server_ops, i);
+		work_handle = arpc_create_xio_server_work(&con_param, server, &x_server_ops, i);
 		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!work_handle, error_1, "arpc_create_xio_server_work fail.");
 		ret = server_insert_work(server, work_handle);
 		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, error_2, "insert_queue fail.");

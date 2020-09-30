@@ -274,6 +274,11 @@ struct xio_context_params {
 	* pass 0 if want the depth to remain default (XIO_MAX_IOV + constant) */
 	int                     rq_depth;
 
+	/**< define msg head  inline buffers for send/recv	*/
+	uint32_t		max_inline_xio_hdr;
+
+	/**< define msg data  inline buffers for send/recv	*/
+	uint64_t		max_inline_xio_data;
 };
 
 

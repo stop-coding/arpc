@@ -26,55 +26,93 @@
 #include "arpc_response.h"
 
 struct aprc_paramter{
-	uint8_t is_init;
-	uint32_t thread_max_num;
-	uint32_t cpu_max_num;
+	uint16_t is_init;
+	uint16_t pad;
 	tp_handle thread_pool;
 	struct arpc_mutex mutex;
+	struct aprc_option opt;
 };
 
 static struct aprc_paramter g_param= {
-	.thread_max_num = 32,	//默认是个线程
-	.cpu_max_num    = 16,
+	.is_init        = 0,
 	.thread_pool	= NULL,
-	.mutex			= {.lock = PTHREAD_MUTEX_INITIALIZER,.is_inited = 1}
+	.mutex			= {.lock = PTHREAD_MUTEX_INITIALIZER,.is_inited = 1},
+	.opt			= {
+						.thread_max_num = 10,
+						.cpu_max_num    = 16,
+						.msg_head_max_len = 256,
+						.msg_data_max_len = (8*1024),
+						.msg_iov_max_len  = 1024,
+						.tx_queue_max_depth = 512,
+						.tx_queue_max_size  = (64*1024*1024),
+						.rx_queue_max_depth = 512,
+						.rx_queue_max_size  = (64*1024*1024),
+					}
+	
 };
 
 static const char SERVER_DEFAULT[] = "rsp-header:undefine";
 
-int get_uri(const struct arpc_con_info *param, char *uri, uint32_t uri_len)
+static void set_user_option(const struct aprc_option *opt, struct aprc_option *out_opt)
 {
-	const char *type = NULL, *ip=NULL;
-	uint32_t port = 0;
-	if (!param || !uri) {
-		return -1;
-	}
-	switch(param->type){
-		case ARPC_E_TRANS_TCP:
-			type = "tcp";
-			ip = param->ipv4.ip;
-			port = param->ipv4.port;
-			break;
-		default:
-			ARPC_LOG_ERROR("unkown type:[%d].", param->type);
-			return -1;
-	}
-	(void)sprintf(uri, "%s://%s:%u", type, ip, port);
-	ARPC_LOG_NOTICE("uri:[%s].", uri);
-	return 0;
+	 out_opt->thread_max_num = (opt->thread_max_num && opt->thread_max_num < 256)?opt->thread_max_num:out_opt->thread_max_num;
+	 out_opt->cpu_max_num = (opt->cpu_max_num && opt->cpu_max_num < 256)?opt->cpu_max_num:out_opt->cpu_max_num;
+	 out_opt->msg_head_max_len = (opt->msg_head_max_len >= 128 && opt->msg_head_max_len <= 1024)?opt->msg_head_max_len:out_opt->msg_head_max_len;
+	 out_opt->msg_data_max_len = (opt->msg_data_max_len >= 1024 && opt->msg_data_max_len <= (4*1024*1024))?opt->msg_data_max_len:out_opt->msg_data_max_len;
+	 out_opt->msg_iov_max_len = (opt->msg_iov_max_len >= 1024 && opt->msg_iov_max_len <= (8*1024))?opt->msg_iov_max_len:out_opt->msg_iov_max_len;
+	 out_opt->tx_queue_max_depth = (opt->tx_queue_max_depth >= 128 && opt->tx_queue_max_depth <= (4*1024))?opt->tx_queue_max_depth:out_opt->tx_queue_max_depth;
+	 out_opt->tx_queue_max_size = (opt->tx_queue_max_size >= (8*1024*1024) && opt->tx_queue_max_size <= (1024*1024*1024))?opt->tx_queue_max_size:out_opt->tx_queue_max_size;
+	 out_opt->rx_queue_max_depth = (opt->rx_queue_max_depth >= 128 && opt->rx_queue_max_depth <= (4*1024))?opt->rx_queue_max_depth:out_opt->rx_queue_max_depth;
+	 out_opt->rx_queue_max_size = (opt->rx_queue_max_size >= (8*1024*1024) && opt->rx_queue_max_size <= (1024*1024*1024))?opt->rx_queue_max_size:out_opt->rx_queue_max_size;
 }
 
-int arpc_get_ipv4_addr(struct sockaddr_storage *src_addr, char *ip, uint32_t len, uint32_t *port)
+static void set_xio_option(const struct aprc_option *opt)
 {
-	struct sockaddr_in *s4;
-	LOG_THEN_RETURN_VAL_IF_TRUE((!src_addr || !ip || !port), ARPC_ERROR, "input null.");
-	LOG_THEN_RETURN_VAL_IF_TRUE((src_addr->ss_family != AF_INET || len < INET_ADDRSTRLEN), ARPC_ERROR, "input invalid.");
+	uint32_t val = 0;
+	// head len
+	xio_set_opt(NULL,
+		    XIO_OPTLEVEL_ACCELIO, XIO_OPTNAME_MAX_INLINE_XIO_HEADER,
+		    &opt->msg_head_max_len, sizeof(uint32_t));
+	// data len
+	xio_set_opt(NULL,
+		    XIO_OPTLEVEL_ACCELIO, XIO_OPTNAME_MAX_INLINE_XIO_DATA,
+		    &opt->msg_data_max_len, sizeof(uint64_t));
 
-	s4 = (struct sockaddr_in *)src_addr;
-	*port = s4->sin_port;
-	inet_ntop(AF_INET, s4, ip, len);
-	return ARPC_SUCCESS;
+	// tx queue len
+	xio_set_opt(NULL,
+		    XIO_OPTLEVEL_ACCELIO, XIO_OPTNAME_SND_QUEUE_DEPTH_MSGS,
+		    &opt->tx_queue_max_depth, sizeof(uint32_t));
+	
+	// tx queue len
+	xio_set_opt(NULL,
+		    XIO_OPTLEVEL_ACCELIO, XIO_OPTNAME_SND_QUEUE_DEPTH_BYTES,
+		    &opt->tx_queue_max_size, sizeof(uint64_t));
+
+	// tx iov depth
+	val = (opt->tx_queue_max_size/opt->msg_iov_max_len);
+	val = (val)?val:4;
+	xio_set_opt(NULL,
+		    XIO_OPTLEVEL_ACCELIO, XIO_OPTNAME_MAX_OUT_IOVLEN,
+		    &val, sizeof(uint32_t));
+
+	// rx queue len
+	xio_set_opt(NULL,
+		    XIO_OPTLEVEL_ACCELIO, XIO_OPTNAME_RCV_QUEUE_DEPTH_MSGS,
+		    &opt->rx_queue_max_depth, sizeof(uint32_t));
+	
+	// rx queue len
+	xio_set_opt(NULL,
+		    XIO_OPTLEVEL_ACCELIO, XIO_OPTNAME_RCV_QUEUE_DEPTH_BYTES,
+		    &opt->rx_queue_max_size, sizeof(uint64_t));
+
+	val = (opt->rx_queue_max_size/opt->msg_iov_max_len);
+	val = (val)?val:4;
+	xio_set_opt(NULL,
+		    XIO_OPTLEVEL_ACCELIO, XIO_OPTNAME_MAX_IN_IOVLEN,
+		    &val, sizeof(uint32_t));
+
 }
+
 
 int arpc_init_r(struct aprc_option *opt)
 {
@@ -87,16 +125,16 @@ int arpc_init_r(struct aprc_option *opt)
 		return 0;
 	}
 	g_param.is_init = 1;
-	g_param.cpu_max_num = get_nprocs();
+	g_param.opt.cpu_max_num = get_nprocs();
 	if (opt) {
-		g_param.thread_max_num = (opt->thread_max_num > 4 && opt->thread_max_num < 1024)?opt->thread_max_num:g_param.thread_max_num;
-		g_param.cpu_max_num = (opt->cpu_max_num > 4 && opt->cpu_max_num <= g_param.cpu_max_num)?opt->cpu_max_num:g_param.cpu_max_num;
+		set_user_option(opt, &g_param.opt);
 	}
-	p.cpu_max_num = g_param.cpu_max_num;
-	p.thread_max_num = g_param.thread_max_num;
+	p.cpu_max_num = g_param.opt.cpu_max_num;
+	p.thread_max_num = g_param.opt.thread_max_num;
 	g_param.thread_pool = tp_create_thread_pool(&p);
 	arpc_mutex_unlock(&g_param.mutex);
 	xio_init();
+	set_xio_option(&g_param.opt);
 	return 0;
 }
 int arpc_init()
@@ -110,10 +148,13 @@ int arpc_init()
 		return 0;
 	}
 	g_param.is_init = 1;
-	p.thread_max_num = g_param.thread_max_num;
+	g_param.opt.cpu_max_num = get_nprocs();
+	p.cpu_max_num = g_param.opt.cpu_max_num;
+	p.thread_max_num = g_param.opt.thread_max_num;
 	g_param.thread_pool = tp_create_thread_pool(&p);
 	arpc_mutex_unlock(&g_param.mutex);
 	xio_init();
+	set_xio_option(&g_param.opt);
 	return 0;
 }
 
@@ -136,13 +177,48 @@ tp_handle arpc_get_threadpool()
 
 uint32_t arpc_thread_max_num()
 {
-	return g_param.thread_max_num;
+	return g_param.opt.thread_max_num;
 }
 
 uint32_t arpc_cpu_max_num()
 {
-	return g_param.cpu_max_num;
+	return g_param.opt.cpu_max_num;
 }
+
+int get_uri(const struct arpc_con_info *param, char *uri, uint32_t uri_len)
+{
+	const char *type = NULL, *ip=NULL;
+	uint32_t port = 0;
+	if (!param || !uri) {
+		return -1;
+	}
+	switch(param->type){
+		case ARPC_E_TRANS_TCP:
+			type = "tcp";
+			ip = param->ipv4.ip;
+			port = param->ipv4.port;
+			break;
+		default:
+			ARPC_LOG_ERROR("unkown type:[%d].", param->type);
+			return -1;
+	}
+	(void)sprintf(uri, "%s://%s:%u", type, ip, port);
+	ARPC_LOG_NOTICE("get uri:[%s].", uri);
+	return 0;
+}
+
+int arpc_get_ipv4_addr(struct sockaddr_storage *src_addr, char *ip, uint32_t len, uint32_t *port)
+{
+	struct sockaddr_in *s4;
+	LOG_THEN_RETURN_VAL_IF_TRUE((!src_addr || !ip || !port), ARPC_ERROR, "input null.");
+	LOG_THEN_RETURN_VAL_IF_TRUE((src_addr->ss_family != AF_INET || len < INET_ADDRSTRLEN), ARPC_ERROR, "input invalid.");
+
+	s4 = (struct sockaddr_in *)src_addr;
+	*port = s4->sin_port;
+	inet_ntop(AF_INET, s4, ip, len);
+	return ARPC_SUCCESS;
+}
+
 void debug_printf_msg(struct xio_msg *rsp)
 {
 	struct xio_iovec	*sglist = vmsg_base_sglist(&rsp->in);
@@ -302,6 +378,7 @@ struct arpc_common_msg *arpc_create_common_msg(uint32_t ex_data_size)
 	req_msg->flag = 0;
 	QUEUE_INIT(&req_msg->q);
 	req_msg->magic = ARPC_COM_MSG_MAGIC;
+	req_msg->ref = 1;
 	return req_msg;
 error:
 	SAFE_FREE_MEM(req_msg);
@@ -315,6 +392,11 @@ int arpc_destroy_common_msg(struct arpc_common_msg *msg)
 	LOG_THEN_RETURN_VAL_IF_TRUE(!msg, ARPC_ERROR, "msg is null.");
 	ret = arpc_cond_lock(&msg->cond);
 	LOG_THEN_RETURN_VAL_IF_TRUE(ret, ARPC_ERROR, "arpc_cond_lock null.");
+	msg->ref--;
+	if(msg->ref > 0){
+		arpc_cond_unlock(&msg->cond);
+		return 0;
+	}
 	arpc_cond_unlock(&msg->cond);
 	arpc_cond_destroy(&msg->cond);
 	SAFE_FREE_MEM(msg);

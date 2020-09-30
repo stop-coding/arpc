@@ -76,28 +76,41 @@ arpc_session_handle_t arpc_client_create_session(const struct arpc_client_sessio
 
 	session->xio_s = xio_session_create(&client_ctx->xio_param);
 	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!session->xio_s, error_2, "xio_session_create fail.");
+	session->msg_iov_max_len  = (param->opt.msg_iov_max_len && param->opt.msg_iov_max_len <= (4*1024))?
+								param->opt.msg_iov_max_len:
+								(4*1024);
+	session->msg_data_max_len = (param->opt.msg_data_max_len && 
+								param->opt.msg_data_max_len <= (4*1024*1024))?
+								param->opt.msg_data_max_len:
+								(4*1024);
+	session->msg_head_max_len = (param->opt.msg_head_max_len && param->opt.msg_head_max_len <= (1024))?
+								param->opt.msg_head_max_len:
+								(512);
 
 	idle_thread_num = tp_get_pool_idle_num(session->threadpool);
 	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(idle_thread_num < ARPC_MIN_THREAD_IDLE_NUM, error_2, "idle_thread_num[%u] is low 2.", idle_thread_num);
 
-	ARPC_LOG_NOTICE("Max idle thread num[%u], user expact max num[%u].", idle_thread_num, param->con_num);
+	ARPC_LOG_NOTICE("Max idle thread num[%u], user expact max num[%u], rx num[%u].", idle_thread_num, param->con_num, param->rx_con_num);
 	idle_thread_num = idle_thread_num - ARPC_MIN_THREAD_IDLE_NUM;
 	idle_thread_num = (param->con_num && param->con_num < idle_thread_num)? param->con_num : idle_thread_num; // 默认是两个链接
 
 	idle_thread_num = (idle_thread_num < ARPC_CLIENT_MAX_CON_NUM)? idle_thread_num: ARPC_CLIENT_MAX_CON_NUM;
 
-	rx_con_num = (param->rx_con_num > 1 )? param->rx_con_num: 1; //至少保留一个接收通道
+	rx_con_num = (param->rx_con_num > 0)? param->rx_con_num: 0; //至少保留一个接收通道
+	rx_con_num = (rx_con_num <= (idle_thread_num/2))? rx_con_num: (idle_thread_num/2); //接收通道最多是总链路的一半
 	for (i = 0; i < idle_thread_num; i++) {
 		con = arpc_create_connection(ARPC_CON_TYPE_CLIENT, session, i);
 		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!con, error_2, "arpc_init_client_conn fail.");
-		ret = arpc_wait_connected(con, 20*1000);
-		LOG_ERROR_IF_VAL_TRUE(ret, "wait_connection_finished timeout, continue.");
 		if(rx_con_num){
 			rx_con_num--;
 			set_connection_mode(con, ARPC_CON_MODE_DIRE_IN);
 			ARPC_LOG_NOTICE("connection[%u][%p] set rx mode!!", i, con);
 		}
 	}
+
+	ret = session_get_conn(session, &con, 5*1000);//等待至少一条链路可用
+	LOG_ERROR_IF_VAL_TRUE(ret, "wait_connection_finished timeout....");
+
 
 	ARPC_LOG_NOTICE("Create session[%p] success, work thread num[%u]!!", session, idle_thread_num);
 

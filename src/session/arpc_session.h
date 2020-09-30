@@ -111,6 +111,9 @@ struct arpc_connection {
 	QUEUE 						q;
 	uint32_t					magic;
 	uint32_t					id;
+	uint32_t		msg_head_max_len;
+	uint64_t		msg_data_max_len;
+	uint32_t		msg_iov_max_len;
 	struct xio_connection		*xio_con;				/* connection 资源*/
 	enum arpc_connection_type   type;				
 	enum xio_con_status			status;
@@ -145,6 +148,9 @@ struct arpc_session_handle{
 	uint32_t 	is_close;
 	struct arpc_cond  cond;
 	struct arpc_session_ops	  ops;
+	uint32_t	msg_head_max_len;
+	uint64_t	msg_data_max_len;
+	uint32_t	msg_iov_max_len;
 	void 	*usr_context;			// 用户上下文
 	char    ex_ctx[0];			/* exterd handle */
 };
@@ -167,6 +173,8 @@ struct arpc_work_handle{
 	void 	*usr_context;			// 用户上下文
 	work_handle_t 		thread_handle;
 	enum xio_work_status status;
+	uint32_t		msg_head_max_len;
+	uint64_t		msg_data_max_len;
 	char 	uri[URI_MAX_LEN];
 	char    ex_ctx[0];			/* exterd handle */
 };
@@ -186,7 +194,10 @@ struct arpc_server_handle{
 	int (*session_teardown)(const arpc_session_handle_t, void *usr_server_ctx, void *usr_session_ctx);
 	void 	*usr_context;			// 用户上下文
 	char 	uri[URI_MAX_LEN];
-	uint8_t		is_stop;
+	uint32_t	msg_head_max_len;
+	uint64_t	msg_data_max_len;
+	uint32_t	msg_iov_max_len;
+	uint32_t		is_stop;
 	char    ex_ctx[0];			/* exterd handle */
 };
 
@@ -207,6 +218,7 @@ int session_remove_con(struct arpc_session_handle *s, struct arpc_connection *co
 int session_get_conn(struct arpc_session_handle *s, struct arpc_connection **con, int64_t timeout_ms);
 int set_connection_mode(struct arpc_connection *con, enum arpc_connection_mode conn_mode);
 
+int check_xio_msg_valid(const struct arpc_connection *conn, const struct xio_vmsg *pmsg);
 int arpc_session_async_send(struct arpc_connection *conn, struct arpc_common_msg  *msg);
 int arpc_session_send_comp_notify(struct arpc_connection *conn, struct arpc_common_msg *msg);
 
@@ -218,7 +230,7 @@ int server_insert_session(struct arpc_server_handle *server, struct arpc_session
 int server_remove_session(struct arpc_server_handle *server, struct arpc_session_handle *session);
 
 struct arpc_work_handle *arpc_create_xio_server_work(const struct arpc_con_info *con_param, 
-													void *threadpool, 
+													struct arpc_server_handle* server, 
 													struct xio_session_ops *work_ops,
 													uint32_t index);
 int  arpc_destroy_xio_server_work(struct arpc_work_handle *work);

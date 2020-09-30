@@ -251,6 +251,8 @@ inline static int arpc_cond_destroy(struct arpc_cond *cond)
 #define FLAG_RSP_USER_DATA 			6
 #define FLAG_MSG_ERROR_DISCARD_DATA 7
 
+#define XIO_MSG_FLAG_ALLOC_IOV_MEM 	8
+
 // 最小空闲的线程数
 #define ARPC_MIN_THREAD_IDLE_NUM    4
 
@@ -309,6 +311,7 @@ enum  arpc_msg_type{
 struct arpc_common_msg {
 	QUEUE 						q;
 	uint32_t					magic;
+	int							ref;
 	enum	arpc_msg_type		type;
 	struct arpc_cond 			cond;				
 	struct arpc_connection		*conn;
