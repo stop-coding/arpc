@@ -318,24 +318,28 @@ static int arpc_init_client_conn(struct arpc_connection *con, struct arpc_sessio
 
 	LOG_THEN_RETURN_VAL_IF_TRUE(!con, -1, "arpc_new_connection fail.");
 	con->client.affinity = index + 1;
+	con->status = XIO_STA_INIT;
 	(void)memset(&ctx_params, 0, sizeof(struct xio_context_params));
 	ctx_params.max_inline_xio_data = s->msg_data_max_len;
 	ctx_params.max_inline_xio_hdr = s->msg_head_max_len;
+
 	con->xio_con_ctx = xio_context_create(NULL, 0, con->client.affinity);
-	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!con->xio_con_ctx, free_con, "xio_context_create fail.");
+	LOG_THEN_RETURN_VAL_IF_TRUE(!con->xio_con_ctx, -1, "xio_context_create fail.");
+
 	(void)memset(&xio_con_param, 0, sizeof(struct xio_connection_params));
 	xio_con_param.session			= s->xio_s;
 	xio_con_param.ctx				= con->xio_con_ctx;
 	xio_con_param.conn_idx			= con->client.affinity;
 	xio_con_param.conn_user_context	= con;
+
+	ret = arpc_cond_lock(&con->cond);
+	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, free_xio_ctx, "arpc_cond_lock fail, maybe free already.");
+	
 	con->xio_con = xio_connect(&xio_con_param);
-	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!con->xio_con, free_xio_ctx, "xio_connect fail.");
+	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!con->xio_con, unlock, "xio_connect fail.");
 	thread.loop = &xio_client_run_con;
 	thread.stop = NULL;
 	thread.usr_ctx = (void*)con;
-
-	ret = arpc_cond_lock(&con->cond);
-	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, free_xio_con, "arpc_cond_lock fail, maybe free already.");
 
 	con->client.thread_handle = tp_post_one_work(s->threadpool, &thread, WORK_DONE_AUTO_FREE);
 	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!con->client.thread_handle, unlock, "tp_post_one_work fail.");
@@ -348,15 +352,14 @@ static int arpc_init_client_conn(struct arpc_connection *con, struct arpc_sessio
 		tp_cancel_one_work(&con->client.thread_handle);
 	}
 	return ret;
-
 unlock:
+	ret = arpc_cond_wait_timeout(&con->cond, WAIT_THREAD_RUNING_TIMEOUT);
+	LOG_ERROR_IF_VAL_TRUE(ret, "arpc_cond_wait_timeout");
+
 	arpc_cond_unlock(&con->cond);
-free_xio_con:
-	xio_connection_destroy(con->xio_con);
 free_xio_ctx:
 	if(con->xio_con_ctx)
 		xio_context_destroy(con->xio_con_ctx);
-free_con:
 	return -1;
 }
 
@@ -408,8 +411,8 @@ struct arpc_connection *arpc_create_connection(enum arpc_connection_type type,
 
 	return con;
 free_con:
-	ret = arpc_destroy_connection(con, 2*1000);
-	LOG_ERROR_IF_VAL_TRUE(ret, "arpc_destroy_connection fail.");
+	ret = arpc_delete_connection(con);
+	LOG_ERROR_IF_VAL_TRUE(ret, "arpc_delete_connection fail.");
 	return NULL;
 }
 
@@ -423,7 +426,7 @@ int  arpc_destroy_connection(struct arpc_connection *con, int64_t timeout_s)
 	con->status = XIO_STA_CLEANUP;
 	arpc_cond_notify_all(&con->cond);
 	arpc_cond_unlock(&con->cond);
-
+	
 	ret = arpc_cond_lock(&con->cond);
 	LOG_THEN_RETURN_VAL_IF_TRUE(ret, ARPC_ERROR, "arpc_cond_lock fail, maybe free already.");
 	if(con->xio_con){
@@ -437,7 +440,7 @@ int  arpc_destroy_connection(struct arpc_connection *con, int64_t timeout_s)
 	}
 	arpc_cond_notify_all(&con->cond);
 	arpc_cond_unlock(&con->cond);
-
+	arpc_sleep(10);
 	switch (con->type)
 	{
 		case ARPC_CON_TYPE_CLIENT:

@@ -287,7 +287,7 @@ int client_session_event(struct xio_session *session, struct xio_session_event_d
 			ret = arpc_del_tx_event_to_conn(con_ctx);
 			LOG_ERROR_IF_VAL_TRUE(ret, "arpc_del_tx_event_to_conn fail....");
 
-			if (con_ctx->status == XIO_STA_CLEANUP) {
+			if (con_ctx->status == XIO_STA_CLEANUP || con_ctx->status  == XIO_STA_INIT) {
 				ARPC_LOG_NOTICE("connection[%u][%p] tear down!.", con_ctx->id, event_data->conn);
 				con_ctx->xio_con = NULL;
 			}else{
@@ -311,9 +311,9 @@ int client_session_event(struct xio_session *session, struct xio_session_event_d
 			break;
 		case XIO_SESSION_REJECT_EVENT:
 		case XIO_SESSION_CONNECTION_REFUSED_EVENT: /**< connection refused event*/
-			arpc_cond_lock(&con_ctx->cond);
-			if (event_data->conn)
-				xio_connection_destroy(event_data->conn);
+			ret = arpc_cond_lock(&con_ctx->cond);
+			LOG_ERROR_IF_VAL_TRUE(ret, "arpc_cond_lock fail....");
+			con_ctx->xio_con = NULL;
 			con_ctx->status = XIO_STA_TEARDOWN;
 			con_ctx->client.recon_interval_s += 10;
 			con_ctx->is_busy = 1;

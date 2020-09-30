@@ -82,10 +82,13 @@ arpc_session_handle_t arpc_client_create_session(const struct arpc_client_sessio
 	session->msg_data_max_len = (param->opt.msg_data_max_len && 
 								param->opt.msg_data_max_len <= (4*1024*1024))?
 								param->opt.msg_data_max_len:
-								(4*1024);
+								(8*1024);
 	session->msg_head_max_len = (param->opt.msg_head_max_len && param->opt.msg_head_max_len <= (1024))?
 								param->opt.msg_head_max_len:
 								(512);
+	ARPC_LOG_NOTICE("session->msg_iov_max_len:%u", session->msg_iov_max_len);
+	ARPC_LOG_NOTICE("session->msg_data_max_len:%lu", session->msg_data_max_len);
+	ARPC_LOG_NOTICE("session->msg_head_max_len:%u", session->msg_head_max_len);
 
 	idle_thread_num = tp_get_pool_idle_num(session->threadpool);
 	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(idle_thread_num < ARPC_MIN_THREAD_IDLE_NUM, error_2, "idle_thread_num[%u] is low 2.", idle_thread_num);

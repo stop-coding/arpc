@@ -40,12 +40,12 @@ static struct aprc_paramter g_param= {
 	.opt			= {
 						.thread_max_num = 10,
 						.cpu_max_num    = 16,
-						.msg_head_max_len = 256,
-						.msg_data_max_len = (8*1024),
-						.msg_iov_max_len  = 1024,
-						.tx_queue_max_depth = 512,
+						.msg_head_max_len = MAX_HEADER_DATA_LEN,
+						.msg_data_max_len = DATA_DEFAULT_MAX_LEN,
+						.msg_iov_max_len  = IOV_DEFAULT_MAX_LEN,
+						.tx_queue_max_depth = 1024,
 						.tx_queue_max_size  = (64*1024*1024),
-						.rx_queue_max_depth = 512,
+						.rx_queue_max_depth = 1024,
 						.rx_queue_max_size  = (64*1024*1024),
 					}
 	
@@ -266,7 +266,7 @@ int post_to_async_thread(struct arpc_thread_param *param)
 
 int create_xio_msg_usr_buf(struct xio_msg *msg, struct proc_header_func *ops, uint64_t iov_max_len, void *usr_ctx)
 {
-	struct xio_iovec	*sglist;
+	struct xio_iovec	*sglist =NULL;
 	uint32_t			nents = 0;
 	struct arpc_header_msg header;
 	uint32_t flag = 0;
@@ -359,7 +359,7 @@ int destroy_xio_msg_usr_buf(struct arpc_vmsg *rev_iov, mem_free_cb_t free_cb, vo
 		if (rev_iov->vec[i].data)
 			free_cb(rev_iov->vec[i].data, usr_ctx);
 	}
-	if (rev_iov->vec)
+	if (rev_iov->vec_num && rev_iov->vec)
 		ARPC_MEM_FREE(rev_iov->vec, NULL);
 	
 	return 0;
