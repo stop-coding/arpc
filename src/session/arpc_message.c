@@ -132,16 +132,14 @@ int conver_msg_arpc_to_xio(const struct arpc_vmsg *usr_msg, struct xio_vmsg	*xio
 		memset(xio_msg->pdata_iov.sglist, 0, usr_msg->vec_num * sizeof(struct xio_iovec_ex));
 		xio_msg->pad = 1;
 		for (i =0; i < usr_msg->vec_num; i++){
-			LOG_THEN_GOTO_TAG_IF_VAL_TRUE(usr_msg->vec[i].len > IOV_DEFAULT_MAX_LEN, 
-											data_null, 
-											"vec len[%lu] is over max limit[%u].",
-											usr_msg->vec[i].len,
-											IOV_DEFAULT_MAX_LEN);
+			ARPC_ASSERT(usr_msg->vec[i].data, "data is null.");
+			ARPC_ASSERT(usr_msg->vec[i].len, "data len is 0.");
 			xio_msg->pdata_iov.sglist[i].iov_base = usr_msg->vec[i].data;
 			xio_msg->pdata_iov.sglist[i].iov_len = usr_msg->vec[i].len;
 			xio_msg->total_data_len += xio_msg->pdata_iov.sglist[i].iov_len;
 		}
-		assert(xio_msg->total_data_len <= DATA_DEFAULT_MAX_LEN);
+		xio_msg->sgl_type = XIO_SGL_TYPE_IOV_PTR;
+		ARPC_ASSERT(xio_msg->total_data_len <= DATA_DEFAULT_MAX_LEN, "total_data_len is over.");
 	}else{
 		xio_msg->sgl_type = XIO_SGL_TYPE_IOV;
 		xio_msg->data_iov.nents = 0;
@@ -202,7 +200,6 @@ int conver_msg_xio_to_arpc(const struct xio_vmsg *xio_msg, struct arpc_vmsg *msg
 			msg->vec[i].len	= sglist[i].iov_len;
 			msg->total_data +=msg->vec[i].len;
 		}
-		abort();//调试
 	}else if (nents && (xio_msg->sgl_type == XIO_SGL_TYPE_IOV_PTR)){
 		// 自定义buf，结构体可以强制转换
 		sglist = vmsg_base_sglist(xio_msg);

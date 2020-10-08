@@ -80,7 +80,6 @@ static int process_rx_data(const struct arpc_vmsg *req_iov, struct arpc_rsp *rsp
 	sprintf(file_path, "./rev_%s", (char *)usr_context);
 
 	BASE_LOG_NOTICE("------file:%s, receive len:%lu.\n", file_path, req_iov->total_data);
-	BASE_LOG_NOTICE("------file:%s, receive len:%lu.\n", file_path, req_iov->total_data);
 	fp = fopen(file_path, "ab");
 	if (!fp){
 		BASE_LOG_ERROR("fopen path:%s fail.\n", file_path);
@@ -183,7 +182,7 @@ static int process_async(const struct arpc_vmsg *req_iov, struct arpc_rsp *rsp, 
 	}
 	sprintf(file_path, "./rev_%s", (char *)usr_context);
 
-	BASE_LOG_NOTICE("----dddd--file:%s, receive len:%lu.\n", file_path, req_iov->total_data);
+	BASE_LOG_NOTICE("----file:%s, receive len:%lu, vec_num:%u.\n", file_path, req_iov->total_data, req_iov->vec_num);
 
 	fp = fopen(file_path, "ab");
 	if (!fp){
@@ -198,10 +197,9 @@ static int process_async(const struct arpc_vmsg *req_iov, struct arpc_rsp *rsp, 
 	}
 	sha256_final(&ctx, buf);
 	fclose(fp);
-	BASE_LOG_NOTICE("----dddd--end.\n");
 
 	conver_hex_to_str(buf, sizeof(buf), buf_str, sizeof(buf_str));
-	BASE_LOG_ERROR("sha256:%s.", (char*)buf_str);
+	BASE_LOG_NOTICE("sha256:%s.", (char*)buf_str);
 
 	rsp_data = mem_alloc(sizeof(struct arpc_vmsg), NULL);
 	memset(rsp_data, 0, sizeof(struct arpc_vmsg));
@@ -219,7 +217,6 @@ static int process_async(const struct arpc_vmsg *req_iov, struct arpc_rsp *rsp, 
 		rsp_data->total_data +=rsp_data->vec[i].len;
 	}
 	rsp->rsp_iov = rsp_data;
-	BASE_LOG_NOTICE("----dddd--end:%p.\n", rsp_data);
 	rsp->flags = 0;
 
 	return 0;
@@ -284,7 +281,7 @@ static int process_oneway_async(const struct arpc_vmsg *req_iov, uint32_t *flags
 	fclose(fp);
 
 	conver_hex_to_str(buf, sizeof(buf), buf_str, sizeof(buf_str));
-	BASE_LOG_ERROR("sha256:%s.", (char*)buf_str);
+	BASE_LOG_NOTICE("sha256:%s.", (char*)buf_str);
 
 	rsp_data = mem_alloc(sizeof(struct arpc_vmsg), NULL);
 	memset(rsp_data, 0, sizeof(struct arpc_vmsg));
@@ -346,7 +343,7 @@ int main(int argc, char *argv[])
 	memcpy(param.con.ipv4.ip, argv[1], IPV4_MAX_LEN);
 	param.con.ipv4.port = atoi(argv[2]);
 
-	param.work_num = 5;
+	param.work_num = 4;
 	param.default_ops = ops;
 	param.new_session_start = &new_session_start;
 	param.new_session_end = &new_session_end;

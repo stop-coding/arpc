@@ -65,14 +65,14 @@ arpc_server_t arpc_server_create(const struct arpc_server_param *param)
 	con_param = param->con;
 	server->msg_iov_max_len  = (param->iov_max_len && param->iov_max_len <= (4*1024))?
 								param->iov_max_len:
-								(4*1024);
+								(IOV_DEFAULT_MAX_LEN);
 	server->msg_data_max_len = (param->opt.msg_data_max_len && 
 								param->opt.msg_data_max_len <= (4*1024*1024))?
 								param->opt.msg_data_max_len:
-								(1024*1024);
+								(DATA_DEFAULT_MAX_LEN);
 	server->msg_head_max_len = (param->opt.msg_head_max_len && param->opt.msg_head_max_len <= (1024))?
 								param->opt.msg_head_max_len:
-								(512);
+								(MAX_HEADER_DATA_LEN);
 
 	ret = get_uri(&con_param, server->uri, URI_MAX_LEN);
 	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, error_1, "arpc_create_server fail");

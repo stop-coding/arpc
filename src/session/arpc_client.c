@@ -78,14 +78,14 @@ arpc_session_handle_t arpc_client_create_session(const struct arpc_client_sessio
 	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!session->xio_s, error_2, "xio_session_create fail.");
 	session->msg_iov_max_len  = (param->opt.msg_iov_max_len && param->opt.msg_iov_max_len <= (4*1024))?
 								param->opt.msg_iov_max_len:
-								(4*1024);
+								(IOV_DEFAULT_MAX_LEN);
 	session->msg_data_max_len = (param->opt.msg_data_max_len && 
 								param->opt.msg_data_max_len <= (4*1024*1024))?
 								param->opt.msg_data_max_len:
-								(8*1024);
+								(DATA_DEFAULT_MAX_LEN);
 	session->msg_head_max_len = (param->opt.msg_head_max_len && param->opt.msg_head_max_len <= (1024))?
 								param->opt.msg_head_max_len:
-								(512);
+								(MAX_HEADER_DATA_LEN);
 	ARPC_LOG_NOTICE("session->msg_iov_max_len:%u", session->msg_iov_max_len);
 	ARPC_LOG_NOTICE("session->msg_data_max_len:%lu", session->msg_data_max_len);
 	ARPC_LOG_NOTICE("session->msg_head_max_len:%u", session->msg_head_max_len);

@@ -286,7 +286,7 @@ int create_xio_msg_usr_buf(struct xio_msg *msg, struct proc_header_func *ops, ui
 	msg->usr_flags = 0;
 	if(ops->proc_head_cb){
 		ret = ops->proc_head_cb(&header, usr_ctx, &flag);
-		if (ret != ARPC_SUCCESS || !msg->in.total_data_len){
+		if (ret != ARPC_SUCCESS){
 			//SET_FLAG(msg->usr_flags, FLAG_MSG_ERROR_DISCARD_DATA); // data数据不做处理
 			ARPC_LOG_DEBUG("discard data, total_data_len[%lu].", msg->in.total_data_len);
 			return ARPC_ERROR;
@@ -295,7 +295,7 @@ int create_xio_msg_usr_buf(struct xio_msg *msg, struct proc_header_func *ops, ui
 	if (!msg->in.total_data_len){
 		//SET_FLAG(msg->usr_flags, FLAG_MSG_ERROR_DISCARD_DATA); // data数据不做处理
 		ARPC_LOG_DEBUG("discard data, total_data_len[%lu].", msg->in.total_data_len);
-		return 0;
+		return ARPC_ERROR;
 	}
 	msg->usr_flags = flag;
 	// alloc data buf form user define call back
@@ -319,11 +319,11 @@ int create_xio_msg_usr_buf(struct xio_msg *msg, struct proc_header_func *ops, ui
 	ARPC_LOG_DEBUG("get msg, nent:%u, iov_max_len:%lu, total_size:%lu, sglist:%p", nents, iov_max_len, msg->in.total_data_len, sglist);
 	for (i = 0; i < nents - 1; i++) {
 		sglist[i].iov_len = iov_max_len;
-		sglist[i].iov_base = ops->alloc_cb(sglist[i].iov_len, usr_ctx);
+		sglist[i].iov_base = ops->alloc_cb(iov_max_len, usr_ctx);
 		LOG_THEN_GOTO_TAG_IF_VAL_TRUE((!sglist[i].iov_base), error_1, "calloc fail.");
 	}
 	sglist[i].iov_len = last_size;
-	sglist[i].iov_base = ops->alloc_cb(sglist[i].iov_len, usr_ctx);
+	sglist[i].iov_base = ops->alloc_cb(iov_max_len, usr_ctx);
 	ARPC_LOG_DEBUG("i:%u ,data:%p, len:%lu.",i, sglist[i].iov_base, sglist[i].iov_len);
 	// 出参
 	msg->in.data_tbl.sglist = (void*)sglist;

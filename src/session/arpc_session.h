@@ -204,6 +204,7 @@ struct arpc_server_handle{
 struct arpc_connection *arpc_create_connection(enum arpc_connection_type type, 
 										struct arpc_session_handle *s, 
 										uint32_t index);
+int  arpc_disconnection(struct arpc_connection *con, int64_t timeout_s);
 int  arpc_destroy_connection(struct arpc_connection *con, int64_t timeout_s);
 int  arpc_wait_connected(struct arpc_connection *con, uint64_t timeout_ms);
 int  arpc_add_tx_event_to_conn(struct arpc_connection *con);

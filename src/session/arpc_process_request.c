@@ -115,7 +115,6 @@ int process_request_data(struct arpc_connection *con, struct xio_msg *req, struc
 		req->in.header.iov_base = NULL;
 		req->in.header.iov_len = 0;
 		vmsg_sglist_set_nents(&req->in, 0);
-
 		ret = post_to_async_thread(async_param);
 		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, free_user_buf, "post_to_async_thread fail, can't do async.");
 	}else{

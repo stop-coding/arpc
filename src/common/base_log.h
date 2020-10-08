@@ -71,10 +71,10 @@ do{\
 
 #define BASE_ASSERT(condition, format, arg...)	\
 do{\
-	if(unlikely((condition))){\
+	if(unlikely(!(condition))){\
 		BASE_LOG_ERROR(format, ##arg);\
-		assert(!condition);\
 	}\
+	assert(condition);\
 }while(0);
 
 #define LOG_ERROR_IF_VAL_TRUE(val, format, arg...)	\

@@ -82,8 +82,7 @@ int server_session_event(struct xio_session *session, struct xio_session_event_d
 			xio_connection_destroy(event_data->conn);
 			if(event_data->conn_user_context != session_ctx->server){
 				con = (struct arpc_connection *)event_data->conn_user_context;
-				ARPC_LOG_ERROR("##### connection[%u][%p] teardown.", con->id, con);
-
+				ARPC_LOG_NOTICE("##### connection[%u][%p] teardown.", con->id, con);
 				ret = arpc_del_tx_event_to_conn(con);
 				LOG_ERROR_IF_VAL_TRUE(ret, "arpc_del_tx_event_to_conn fail....");
 
@@ -97,7 +96,7 @@ int server_session_event(struct xio_session *session, struct xio_session_event_d
 			break;
 		case XIO_SESSION_TEARDOWN_EVENT:
 			xio_session_destroy(session);
-			ARPC_LOG_ERROR("##### session[%p] teardown.", session_fd);
+			ARPC_LOG_NOTICE("##### session[%p] teardown.", session_fd);
 			ret = server_remove_session(session_ctx->server, session_fd);
 			LOG_ERROR_IF_VAL_TRUE(ret, "server_insert_session fail.");
 			if(session_ctx->server->session_teardown){
@@ -303,11 +302,6 @@ int client_session_event(struct xio_session *session, struct xio_session_event_d
 			}
 			arpc_cond_notify_all(&con_ctx->cond);
 			arpc_cond_unlock(&con_ctx->cond);
-			// 通知session
-			arpc_cond_lock(&session_ctx->cond);
-			arpc_cond_notify_all(&session_ctx->cond);
-			arpc_cond_unlock(&session_ctx->cond);
-
 			break;
 		case XIO_SESSION_REJECT_EVENT:
 		case XIO_SESSION_CONNECTION_REFUSED_EVENT: /**< connection refused event*/
@@ -320,10 +314,6 @@ int client_session_event(struct xio_session *session, struct xio_session_event_d
 			arpc_cond_notify(&con_ctx->cond);
 			ARPC_LOG_NOTICE(" build connection[%u][%p] refused!.", con_ctx->id, event_data->conn);
 			arpc_cond_unlock(&con_ctx->cond);
-			// 通知session
-			arpc_cond_lock(&session_ctx->cond);
-			arpc_cond_notify_all(&session_ctx->cond);
-			arpc_cond_unlock(&session_ctx->cond);
 			break;
 		case XIO_SESSION_ERROR_EVENT:
 			break;

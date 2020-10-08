@@ -96,7 +96,21 @@ int arpc_destroy_session(struct arpc_session_handle* session, int64_t timeout_ms
 
 	ret = arpc_cond_lock(&session->cond); /* 锁 */
 	LOG_THEN_RETURN_VAL_IF_TRUE(ret, -1, "arpc_cond_lock session fail.");
-	// 回收con资源
+
+	// 断开链路
+	QUEUE_FOREACH_VAL(&session->q_con, iter, 
+	{
+		con = QUEUE_DATA(iter, struct arpc_connection, q);
+		ret = arpc_disconnection(con, timeout_ms);
+		LOG_ERROR_IF_VAL_TRUE(ret, "arpc_disconnection fail.");
+	});
+
+	if(timeout_ms){
+		ret = arpc_cond_wait_timeout(&session->cond, timeout_ms);
+		LOG_ERROR_IF_VAL_TRUE(ret, "arpc_cond_wait_timeout session[%p] free timeout.", session);
+	}
+
+	// 释放con资源
 	while(!QUEUE_EMPTY(&session->q_con)){
 		iter = QUEUE_HEAD(&session->q_con);
 		QUEUE_REMOVE(iter);
@@ -105,10 +119,7 @@ int arpc_destroy_session(struct arpc_session_handle* session, int64_t timeout_ms
 		ret = arpc_destroy_connection(con, timeout_ms);
 		LOG_ERROR_IF_VAL_TRUE(ret, "arpc_destroy_connection fail.");
 	}
-	if(timeout_ms){
-		ret = arpc_cond_wait_timeout(&session->cond, timeout_ms);
-		LOG_ERROR_IF_VAL_TRUE(ret, "arpc_cond_wait_timeout session[%p] free timeout.", session);
-	}
+
 	arpc_cond_unlock(&session->cond);
 
 	ret = arpc_cond_destroy(&session->cond);
@@ -416,7 +427,7 @@ free_con:
 	return NULL;
 }
 
-int  arpc_destroy_connection(struct arpc_connection *con, int64_t timeout_s)
+int  arpc_disconnection(struct arpc_connection *con, int64_t timeout_s)
 {
 	int ret;
 	LOG_THEN_RETURN_VAL_IF_TRUE(!con, ARPC_ERROR, "arpc_connection is null.");
@@ -427,6 +438,7 @@ int  arpc_destroy_connection(struct arpc_connection *con, int64_t timeout_s)
 	arpc_cond_notify_all(&con->cond);
 	arpc_cond_unlock(&con->cond);
 	
+	// 执行释放
 	ret = arpc_cond_lock(&con->cond);
 	LOG_THEN_RETURN_VAL_IF_TRUE(ret, ARPC_ERROR, "arpc_cond_lock fail, maybe free already.");
 	if(con->xio_con){
@@ -438,9 +450,19 @@ int  arpc_destroy_connection(struct arpc_connection *con, int64_t timeout_s)
 		}
 		con->xio_con = NULL;
 	}
-	arpc_cond_notify_all(&con->cond);
 	arpc_cond_unlock(&con->cond);
-	arpc_sleep(10);
+
+	return 0;
+}
+
+int  arpc_destroy_connection(struct arpc_connection *con, int64_t timeout_s)
+{
+	int ret;
+	LOG_THEN_RETURN_VAL_IF_TRUE(!con, ARPC_ERROR, "arpc_connection is null.");
+	//通知释放
+	ret = arpc_cond_lock(&con->cond);
+	LOG_THEN_RETURN_VAL_IF_TRUE(ret, ARPC_ERROR, "arpc_cond_lock fail, maybe free already.");
+	arpc_cond_unlock(&con->cond);
 	switch (con->type)
 	{
 		case ARPC_CON_TYPE_CLIENT:
@@ -529,8 +551,8 @@ static void xio_client_stop_con(struct arpc_connection* con)
 	if(con->xio_con_ctx){
 		xio_context_stop_loop(con->xio_con_ctx);
 	}
-	if (con->status <= XIO_STA_EXIT){
-		ret = arpc_cond_wait_timeout(&con->cond, 1000);
+	if (con->status <= XIO_STA_CLEANUP){
+		ret = arpc_cond_wait_timeout(&con->cond, 5*1000);
 		LOG_ERROR_IF_VAL_TRUE(ret, "wait loop exit time out.");
 	}
 	arpc_cond_unlock(&con->cond);
@@ -928,7 +950,7 @@ int check_xio_msg_valid(const struct arpc_connection *conn, const struct xio_vms
 	}
 
 	if(pmsg->header.iov_len > conn->msg_head_max_len){
-		ARPC_LOG_ERROR("header len over limit, iov_len:%lu, max:%u.", 
+		ARPC_LOG_ERROR("header len over limit, head len:%lu, max:%u.", 
 						pmsg->header.iov_len, 
 						conn->msg_head_max_len);
 		return -1;
@@ -936,10 +958,10 @@ int check_xio_msg_valid(const struct arpc_connection *conn, const struct xio_vms
 
 	if (pmsg->total_data_len) {
 		LOG_THEN_RETURN_VAL_IF_TRUE((conn->msg_data_max_len < pmsg->total_data_len), -1, 
-									"data depth over limit, nents:%lu, max:%lu.", 
+									"data len over limit, msg len:%lu, max:%lu.", 
 									pmsg->total_data_len, 
 									conn->msg_data_max_len);
-	}	
+	}
 	nents = vmsg_sglist_nents(pmsg);
 	if(nents > (conn->msg_data_max_len/conn->msg_iov_max_len)){
 		ARPC_LOG_ERROR("data depth over limit, nents:%u, max:%lu.", 
