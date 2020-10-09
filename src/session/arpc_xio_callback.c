@@ -223,8 +223,14 @@ reject:
 }
 
 
-int client_session_established(struct xio_session *session, struct xio_new_session_rsp *rsp, void *conn_context)
+int client_session_established(struct xio_session *session, struct xio_new_session_rsp *rsp, void *session_context)
 {
+	SESSION_CTX(session_ctx, session_context);
+	arpc_cond_lock(&session_ctx->cond);
+	session_ctx->is_close = 0;
+	ARPC_LOG_NOTICE("established session.");
+	arpc_cond_notify_all(&session_ctx->cond);
+	arpc_cond_unlock(&session_ctx->cond);
 	return 0;
 }
 
@@ -245,7 +251,8 @@ int client_session_event(struct xio_session *session, struct xio_session_event_d
 			xio_session_destroy(session);
 			arpc_cond_lock(&session_ctx->cond);
 			if (session_ctx->is_close) {
-				ARPC_LOG_NOTICE(" user to tear down session.");
+				ARPC_LOG_NOTICE("tear down session.");
+				session_ctx->is_close++;
 				arpc_cond_notify_all(&session_ctx->cond);
 				arpc_cond_unlock(&session_ctx->cond);
 				break;
@@ -272,9 +279,9 @@ int client_session_event(struct xio_session *session, struct xio_session_event_d
 			arpc_cond_notify(&con_ctx->cond);
 			ARPC_LOG_NOTICE(" build connection[%u][%p] success!.", con_ctx->id, event_data->conn);
 			arpc_cond_unlock(&con_ctx->cond);
-			// 通知session
+
 			arpc_cond_lock(&session_ctx->cond);
-			arpc_cond_notify_all(&session_ctx->cond);
+			arpc_cond_notify(&session_ctx->cond);
 			arpc_cond_unlock(&session_ctx->cond);
 			break;
 		case XIO_SESSION_CONNECTION_TEARDOWN_EVENT: // conn断开，需要释放con资源
@@ -282,15 +289,10 @@ int client_session_event(struct xio_session *session, struct xio_session_event_d
 				xio_connection_destroy(event_data->conn);
 			ret = arpc_cond_lock(&con_ctx->cond);
 			LOG_ERROR_IF_VAL_TRUE(ret, "arpc_cond_lock fail....");
-
-			ret = arpc_del_tx_event_to_conn(con_ctx);
-			LOG_ERROR_IF_VAL_TRUE(ret, "arpc_del_tx_event_to_conn fail....");
-
-			if (con_ctx->status == XIO_STA_CLEANUP || con_ctx->status  == XIO_STA_INIT) {
-				ARPC_LOG_NOTICE("connection[%u][%p] tear down!.", con_ctx->id, event_data->conn);
-				con_ctx->xio_con = NULL;
-			}else{
-				ARPC_LOG_ERROR("some error, connection[%u][%p] tear down!.", con_ctx->id, event_data->conn);
+			if(con_ctx->status == XIO_STA_RUN_ACTION){
+				ret = arpc_del_tx_event_to_conn(con_ctx);
+				LOG_ERROR_IF_VAL_TRUE(ret, "arpc_del_tx_event_to_conn fail....");
+				ARPC_LOG_ERROR("some error, connection[%u][%p] tear down! retry connection", con_ctx->id, event_data->conn);
 				(void)memset(&xio_con_param, 0, sizeof(struct xio_connection_params));
 				xio_con_param.session			= session_ctx->xio_s;
 				xio_con_param.ctx				= con_ctx->xio_con_ctx;
@@ -299,6 +301,9 @@ int client_session_event(struct xio_session *session, struct xio_session_event_d
 				con_ctx->xio_con = xio_connect(&xio_con_param);
 				con_ctx->status = XIO_STA_TEARDOWN;
 				con_ctx->client.recon_interval_s += 10;
+			}else{
+				ARPC_LOG_NOTICE("connection[%u][%p] tear down!.", con_ctx->id, event_data->conn);
+				con_ctx->xio_con = NULL;
 			}
 			arpc_cond_notify_all(&con_ctx->cond);
 			arpc_cond_unlock(&con_ctx->cond);

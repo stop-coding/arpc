@@ -940,7 +940,7 @@ static int xio_nexus_initial_pool_create(struct xio_nexus *nexus)
 
 	proto		= transport_hndl->proto;
 	ctx		= transport_hndl->ctx;
-
+	ctx->private_context = NULL;
 	retval = xio_ctx_pool_create(ctx, proto,
 				     XIO_CONTEXT_POOL_CLASS_INITIAL);
 	if (retval) {
@@ -991,8 +991,11 @@ static int xio_nexus_primary_pool_create(struct xio_nexus *nexus)
 	proto		= transport_hndl->proto;
 	ctx		= transport_hndl->ctx;
 
+	ctx->private_context = transport_hndl;
+
 	retval = xio_ctx_pool_create(ctx, proto,
 				     XIO_CONTEXT_POOL_CLASS_PRIMARY);
+	ctx->private_context = NULL;
 	if (retval) {
 		ERROR_LOG("Failed to create primary pool. nexus:%p\n", nexus);
 		return -1;

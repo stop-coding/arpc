@@ -309,6 +309,8 @@ struct xio_tcp_transport {
 	/* fast path params */
 	enum xio_transport_state	state;
 
+	size_t				default_max_buf_sz;
+
 	/* tx parameters */
 	size_t				max_inline_buf_sz;
 

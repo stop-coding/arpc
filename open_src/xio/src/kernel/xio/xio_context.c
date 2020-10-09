@@ -209,6 +209,7 @@ struct xio_context *xio_context_create(struct xio_context_params *ctx_params,
 
 	/* initialize rdma pools only */
 	transport = xio_get_transport("rdma");
+	ctx->private_context = NULL;
 	if (transport && ctx->prealloc_xio_inline_bufs) {
 		int retval = xio_ctx_pool_create(ctx, XIO_PROTO_RDMA,
 					         XIO_CONTEXT_POOL_CLASS_INITIAL);

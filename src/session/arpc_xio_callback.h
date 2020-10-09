@@ -33,7 +33,7 @@ int server_session_event(struct xio_session *session, struct xio_session_event_d
 int server_on_new_session(struct xio_session *session,struct xio_new_session_req *req, void *server_context);
 
 
-int client_session_established(struct xio_session *session, struct xio_new_session_rsp *rsp, void *conn_context);
+int client_session_established(struct xio_session *session, struct xio_new_session_rsp *rsp, void *session_context);
 int client_session_event(struct xio_session *session, struct xio_session_event_data *event_data, void *session_context);
 
 int msg_head_process(struct xio_session *session, struct xio_msg *rsp, void *conn_context);

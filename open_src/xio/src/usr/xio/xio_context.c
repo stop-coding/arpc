@@ -180,6 +180,7 @@ struct xio_context *xio_context_create(struct xio_context_params *ctx_params,
 
 	/* initialize rdma pools only */
 	transport = xio_get_transport("rdma");
+	ctx->private_context = NULL;
 	if (transport && ctx->prealloc_xio_inline_bufs) {
 		int retval = xio_ctx_pool_create(ctx, XIO_PROTO_RDMA,
 					         XIO_CONTEXT_POOL_CLASS_INITIAL);
@@ -774,6 +775,12 @@ int xio_ctx_pool_create(struct xio_context *ctx, enum xio_proto proto,
 		params.start_nr = params.max_nr;
 		params.alloc_nr = 0;
 	}
+
+	params.max_inline_xio_data = ctx->max_inline_xio_data;
+	params.max_inline_xio_hdr = ctx->max_inline_xio_hdr;
+
+	params.pool_hooks.context = ctx->private_context;
+
 	params.pool_hooks.slab_pre_create  =
 		(int (*)(void *, int, void *, void *))
 				pool_ops->slab_pre_create;

@@ -135,6 +135,8 @@ struct xio_tasks_pool_params {
 	int				pool_dd_data_sz;
 	int				slab_dd_data_sz;
 	int				task_dd_data_sz;
+	uint32_t		max_inline_xio_hdr;
+	uint64_t		max_inline_xio_data;
 };
 
 struct xio_tasks_slab {
@@ -145,6 +147,8 @@ struct xio_tasks_slab {
 	uint32_t			end_idx;
 	uint32_t			nr;
 	uint32_t			huge_alloc;
+	uint32_t			max_inline_xio_hdr;
+	uint64_t			max_inline_xio_data;
 	void				*dd_data;
 };
 

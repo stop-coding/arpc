@@ -48,7 +48,6 @@ arpc_session_handle_t arpc_client_create_session(const struct arpc_client_sessio
 	uint32_t idle_thread_num;
 	struct arpc_connection *con;
 	struct xio_connection_params xio_con_param;
-	uint32_t rx_con_num = 0;
 	//LOG_THEN_RETURN_VAL_IF_TRUE(!param->ops, NULL, "ops is null.");
 
 	session = arpc_create_session(SESSION_CLIENT, sizeof(struct arpc_client_ctx));
@@ -98,22 +97,14 @@ arpc_session_handle_t arpc_client_create_session(const struct arpc_client_sessio
 	idle_thread_num = (param->con_num && param->con_num < idle_thread_num)? param->con_num : idle_thread_num; // 默认是两个链接
 
 	idle_thread_num = (idle_thread_num < ARPC_CLIENT_MAX_CON_NUM)? idle_thread_num: ARPC_CLIENT_MAX_CON_NUM;
-
-	rx_con_num = (param->rx_con_num > 0)? param->rx_con_num: 0; //至少保留一个接收通道
-	rx_con_num = (rx_con_num <= (idle_thread_num/2))? rx_con_num: (idle_thread_num/2); //接收通道最多是总链路的一半
+	session->is_close = 1;
 	for (i = 0; i < idle_thread_num; i++) {
 		con = arpc_create_connection(ARPC_CON_TYPE_CLIENT, session, i);
 		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!con, error_2, "arpc_init_client_conn fail.");
-		if(rx_con_num){
-			rx_con_num--;
-			set_connection_mode(con, ARPC_CON_MODE_DIRE_IN);
-			ARPC_LOG_NOTICE("connection[%u][%p] set rx mode!!", i, con);
-		}
 	}
 
-	ret = session_get_conn(session, &con, 5*1000);//等待至少一条链路可用
-	LOG_ERROR_IF_VAL_TRUE(ret, "wait_connection_finished timeout....");
-
+	ret = arpc_wait_session(session, 3*1000);//等待至少一条链路可用
+	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, error_2, "wait_connection_finished timeout....");
 
 	ARPC_LOG_NOTICE("Create session[%p] success, work thread num[%u]!!", session, idle_thread_num);
 
@@ -122,7 +113,7 @@ arpc_session_handle_t arpc_client_create_session(const struct arpc_client_sessio
 error_2:
 	SAFE_FREE_MEM(client_ctx->private_data);
 error_1:
-	arpc_destroy_session(session, 60*1000);
+	arpc_destroy_session(session, 5*1000);
 	ARPC_LOG_ERROR( "create session fail, exit.");
 	return NULL;
 }

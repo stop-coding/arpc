@@ -206,12 +206,12 @@ struct arpc_connection *arpc_create_connection(enum arpc_connection_type type,
 										uint32_t index);
 int  arpc_disconnection(struct arpc_connection *con, int64_t timeout_s);
 int  arpc_destroy_connection(struct arpc_connection *con, int64_t timeout_s);
-int  arpc_wait_connected(struct arpc_connection *con, uint64_t timeout_ms);
 int  arpc_add_tx_event_to_conn(struct arpc_connection *con);
 int  arpc_del_tx_event_to_conn(struct arpc_connection *con);
 
 struct arpc_session_handle *arpc_create_session(enum session_type type, uint32_t ex_ctx_size);
 int arpc_destroy_session(struct arpc_session_handle* session, int64_t timeout_ms);
+int arpc_wait_session(struct arpc_session_handle *session, int64_t timeout_ms);
 int session_rebuild_for_client(struct arpc_session_handle *ses);
 
 int session_insert_con(struct arpc_session_handle *s, struct arpc_connection *con);

@@ -862,11 +862,12 @@ struct xio_tcp_transport *xio_tcp_transport_create(
 	}
 
 	/* from now on don't allow changes */
-	tcp_hndl->max_inline_buf_sz	= xio_tcp_get_inline_buffer_size();
-	if((ctx->max_inline_xio_data > 0 && ctx->max_inline_xio_data < tcp_hndl->max_inline_buf_sz)) {
-		tcp_hndl->max_inline_buf_sz =  ctx->max_inline_xio_data;
-		ERROR_LOG("set tcp max_data_len:%lu", tcp_hndl->max_inline_buf_sz);
+	tcp_hndl->default_max_buf_sz= xio_tcp_get_inline_buffer_size();
+	if((ctx->max_inline_xio_data > 0 && ctx->max_inline_xio_data < tcp_hndl->default_max_buf_sz)) {
+		tcp_hndl->default_max_buf_sz =  ALIGN(xio_tcp_get_max_header_size() + ctx->max_inline_xio_hdr + ctx->max_inline_xio_data, 1024);
+		//WARN_LOG("set tcp default_max_buf_sz:%lu", tcp_hndl->default_max_buf_sz);
 	}
+	tcp_hndl->max_inline_buf_sz	= tcp_hndl->default_max_buf_sz;
 	tcp_hndl->membuf_sz		= tcp_hndl->max_inline_buf_sz;
 
 	if (observer)
@@ -2157,10 +2158,21 @@ static int xio_tcp_primary_pool_slab_pre_create(
 {
 	struct xio_tcp_tasks_slab *tcp_slab =
 		(struct xio_tcp_tasks_slab *)slab_dd_data;
-	size_t inline_buf_sz = xio_tcp_get_inline_buffer_size();
-	size_t	alloc_sz = alloc_nr * ALIGN(inline_buf_sz, PAGE_SIZE);
+
+	struct xio_tcp_transport *tcp_hndl =
+		(struct xio_tcp_transport *)transport_hndl;
+
+	size_t inline_buf_sz;
+	size_t	alloc_sz;
 	int	retval;
 
+	if(tcp_hndl){
+		inline_buf_sz = (tcp_hndl->default_max_buf_sz)?tcp_hndl->default_max_buf_sz:xio_tcp_get_inline_buffer_size();
+		//ERROR_LOG("tcp alloc buf size:%lu.\n", inline_buf_sz);
+	}else{
+		inline_buf_sz = xio_tcp_get_inline_buffer_size();
+	}
+	alloc_sz = alloc_nr * ALIGN(inline_buf_sz, PAGE_SIZE);
 	tcp_slab->buf_size = inline_buf_sz;
 
 	if (disable_huge_pages) {
@@ -2212,7 +2224,7 @@ static int xio_tcp_primary_pool_post_create(
 		/* get ready to receive message */
 		task = xio_tcp_primary_task_alloc(tcp_hndl);
 		if (task == 0) {
-			ERROR_LOG("primary task pool is empty\n");
+			//ERROR_LOG("primary task pool is empty\n");
 			return -1;
 		}
 		tcp_task = (struct xio_tcp_task *)task->dd_data;

@@ -236,7 +236,7 @@ static int xio_tcp_send_setup_req(struct xio_tcp_transport *tcp_hndl,
 
 	DEBUG_LOG("xio_tcp_send_setup_req\n");
 
-	req.buffer_sz		= xio_tcp_get_inline_buffer_size();
+	req.buffer_sz		= (tcp_hndl->default_max_buf_sz > 1024)?tcp_hndl->default_max_buf_sz:xio_tcp_get_inline_buffer_size();
 	req.max_in_iovsz	= tcp_options.max_in_iovsz;
 	req.max_out_iovsz	= tcp_options.max_out_iovsz;
 	req.max_header_len      = g_options.max_inline_xio_hdr;
@@ -346,7 +346,7 @@ static int xio_tcp_on_setup_msg(struct xio_tcp_transport *tcp_hndl,
 		xio_tcp_read_setup_msg(tcp_hndl, task, &req);
 
 		/* current implementation is symmetric */
-		local_buf_size		= xio_tcp_get_inline_buffer_size();
+		local_buf_size		= (tcp_hndl->default_max_buf_sz > 1024)?tcp_hndl->default_max_buf_sz:xio_tcp_get_inline_buffer_size();
 		rsp->buffer_sz		= min(req.buffer_sz, local_buf_size);
 		rsp->max_in_iovsz	= req.max_in_iovsz;
 		rsp->max_out_iovsz	= req.max_out_iovsz;
