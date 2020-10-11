@@ -458,18 +458,18 @@ int  arpc_disconnection(struct arpc_connection *con, int64_t timeout_s)
 	// 执行释放
 	ret = arpc_cond_lock(&con->cond);
 	LOG_THEN_RETURN_VAL_IF_TRUE(ret, ARPC_ERROR, "arpc_cond_lock fail, maybe free already.");
+	ARPC_LOG_NOTICE("conn[%u][%p] will be closed.", con->id, con);
 	if(con->xio_con && con->status == XIO_STA_RUN_ACTION){
-		ARPC_LOG_NOTICE("conn[%u][%p] will be closed.", con->id, con);
+		con->status = XIO_STA_CLEANUP;
 		xio_disconnect(con->xio_con);
 		if(timeout_s){
 			ret = arpc_cond_wait_timeout(&con->cond, timeout_s);
 			LOG_ERROR_IF_VAL_TRUE(ret, "arpc_cond_wait_timeout con[%u][%p] disclosed time out.",con->id, con);
 		}
 		con->xio_con = NULL;
+	}else{
+		con->status = XIO_STA_CLEANUP;
 	}
-	con->status = XIO_STA_CLEANUP;
-	arpc_cond_notify_all(&con->cond);
-
 	arpc_cond_unlock(&con->cond);
 
 	return 0;
