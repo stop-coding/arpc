@@ -97,7 +97,6 @@ arpc_session_handle_t arpc_client_create_session(const struct arpc_client_sessio
 	idle_thread_num = (param->con_num && param->con_num < idle_thread_num)? param->con_num : idle_thread_num; // 默认是两个链接
 
 	idle_thread_num = (idle_thread_num < ARPC_CLIENT_MAX_CON_NUM)? idle_thread_num: ARPC_CLIENT_MAX_CON_NUM;
-	session->is_close = 1;
 	for (i = 0; i < idle_thread_num; i++) {
 		con = arpc_create_connection(ARPC_CON_TYPE_CLIENT, session, i);
 		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!con, error_2, "arpc_init_client_conn fail.");

@@ -67,9 +67,9 @@ enum session_type{
 };
 
 enum xio_con_status{
-	XIO_STA_INIT = 0, 	 //初始化完毕
+	XIO_STA_INIT = 0, 	 //初始化
 	XIO_STA_RUN, 		//运行
-	XIO_STA_RUN_ACTION, //活跃，指链路联通
+	XIO_STA_RUN_ACTIVE, //活跃，指链路联通
 	XIO_STA_TEARDOWN,
 	XIO_STA_CLEANUP, 	//释放
 	XIO_STA_EXIT, 		//退出
@@ -137,6 +137,12 @@ struct arpc_connection {
 	};
 };
 
+enum xio_session_status{
+	XIO_SES_STA_INIT = 0, 	 //初始化
+	XIO_SES_STA_ACTIVE, 	 //活跃
+	XIO_SES_STA_CLOSE,  //关闭
+};
+
 struct arpc_session_handle{
 	QUEUE     q;
 	QUEUE     q_con;
@@ -146,6 +152,7 @@ struct arpc_session_handle{
 	enum session_type type;
 	struct xio_session *xio_s;
 	uint32_t 	is_close;
+	enum xio_session_status status;
 	struct arpc_cond  cond;
 	struct arpc_session_ops	  ops;
 	uint32_t	msg_head_max_len;

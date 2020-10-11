@@ -74,6 +74,7 @@ struct arpc_session_handle *arpc_create_session(enum session_type type, uint32_t
 	session->threadpool = arpc_get_threadpool();
 	session->type = type;
 	session->is_close = 0;
+	session->status = XIO_SES_STA_INIT;
 	return session;
 
 free_buf:
@@ -90,7 +91,7 @@ int arpc_destroy_session(struct arpc_session_handle* session, int64_t timeout_ms
 	LOG_THEN_RETURN_VAL_IF_TRUE(!session, -1, "session null.");
 	ret = arpc_cond_lock(&session->cond); /* 锁 */
 	LOG_THEN_RETURN_VAL_IF_TRUE(ret, -1, "arpc_cond_lock session fail.");
-	session->is_close++;
+	session->is_close = 1;
 	arpc_cond_notify_all(&session->cond);//通知释放资源
 	arpc_cond_unlock(&session->cond);
 
@@ -105,7 +106,7 @@ int arpc_destroy_session(struct arpc_session_handle* session, int64_t timeout_ms
 		LOG_ERROR_IF_VAL_TRUE(ret, "arpc_disconnection fail.");
 	});
 
-	if(timeout_ms && session->is_close <= 1){
+	if(timeout_ms && session->status == XIO_SES_STA_ACTIVE){
 		ret = arpc_cond_wait_timeout(&session->cond, timeout_ms);
 		LOG_ERROR_IF_VAL_TRUE(ret, "arpc_cond_wait_timeout session[%p] free timeout.", session);
 	}
@@ -120,6 +121,11 @@ int arpc_destroy_session(struct arpc_session_handle* session, int64_t timeout_ms
 		LOG_ERROR_IF_VAL_TRUE(ret, "arpc_destroy_connection fail.");
 	}
 
+	// 
+	if (session->xio_s) {
+		xio_session_destroy(session->xio_s);
+		session->xio_s = NULL;
+	}
 	arpc_cond_unlock(&session->cond);
 
 	ret = arpc_cond_destroy(&session->cond);
@@ -136,13 +142,17 @@ int arpc_wait_session(struct arpc_session_handle *session, int64_t timeout_ms)
 	ret = arpc_cond_lock(&session->cond);
 	LOG_THEN_RETURN_VAL_IF_TRUE(ret, ARPC_ERROR, "arpc_mutex_lock session[%p] fail.", session);
 
-	if(!session->is_close){
+	if(session->status == XIO_SES_STA_CLOSE){
+		arpc_cond_unlock(&session->cond);
+		return ARPC_ERROR;
+	}
+	if(session->status == XIO_SES_STA_ACTIVE){
 		arpc_cond_unlock(&session->cond);
 		return 0;
 	}
 	ret = arpc_cond_wait_timeout(&session->cond, timeout_ms);
-	if(ret || session->is_close){
-		ARPC_LOG_ERROR("session[%p] connection fail, status[%u].", session, session->is_close);
+	if(ret || session->status != XIO_SES_STA_ACTIVE){
+		ARPC_LOG_ERROR("session[%p] connection fail, status[%d].", session, session->status);
 		arpc_cond_unlock(&session->cond);
 		return ARPC_ERROR;
 	}
@@ -226,8 +236,8 @@ int session_get_conn(struct arpc_session_handle *s, struct arpc_connection **pco
 	LOG_THEN_RETURN_VAL_IF_TRUE(!pcon, ARPC_ERROR, "pcon is null.");
 	ret = arpc_cond_lock(&s->cond);
 	LOG_THEN_RETURN_VAL_IF_TRUE(ret, ARPC_ERROR, "arpc_mutex_lock session[%p] fail.", s);
-	if(QUEUE_EMPTY(&s->q_con) || s->is_close){
-		ARPC_LOG_ERROR("session[%p] invalid, close status[%u]", s, s->is_close);
+	if(QUEUE_EMPTY(&s->q_con) || s->status != XIO_SES_STA_ACTIVE){
+		ARPC_LOG_ERROR("session[%p] invalid, session status[%d]", s, s->status);
 		arpc_cond_unlock(&s->cond);
 		return ARPC_ERROR;
 	}
@@ -244,7 +254,7 @@ int session_get_conn(struct arpc_session_handle *s, struct arpc_connection **pco
 			ARPC_LOG_DEBUG("thread[%lu],connection[%u][%p], status: tx_msg_num:%lu, sta:%d, dir:%d.",pthread_self(),
 							con->id, con->xio_con, con->tx_msg_num, con->status, con->conn_mode);
 			if((con->tx_msg_num < ARPC_CONN_TX_MAX_DEPTH) && 
-				(con->status == XIO_STA_RUN_ACTION) && 
+				(con->status == XIO_STA_RUN_ACTIVE) && 
 				(con->conn_mode == ARPC_CON_MODE_DIRE_OUT || 
 				con->conn_mode == ARPC_CON_MODE_DIRE_IO)) {
 				ARPC_LOG_DEBUG("connection[%u][%p] get well send.",con->id, con->xio_con);
@@ -385,7 +395,7 @@ static int arpc_init_client_conn(struct arpc_connection *con, struct arpc_sessio
 	}
 	return ret;
 thread_exit:
-	if(con->status == XIO_STA_RUN || con->status == XIO_STA_RUN_ACTION){
+	if(con->status == XIO_STA_RUN || con->status == XIO_STA_RUN_ACTIVE){
 		con->status = XIO_STA_CLEANUP;
 		xio_context_stop_loop(con->xio_con_ctx);
 		ret = arpc_cond_wait_timeout(&con->cond, WAIT_THREAD_RUNING_TIMEOUT);
@@ -404,8 +414,12 @@ static int  arpc_finish_client_conn(struct arpc_connection *con)
 	int ret;
 	LOG_THEN_RETURN_VAL_IF_TRUE(!con, -1, "arpc_connection is null fail.");
 	xio_client_stop_con(con);// 有锁，不要再用锁了
+	if(con->xio_con)
+		xio_connection_destroy(con->xio_con);
+	con->xio_con = NULL;
 	if(con->xio_con_ctx)
 		xio_context_destroy(con->xio_con_ctx);
+	con->xio_con_ctx =NULL;
 	return 0;
 }
 
@@ -459,7 +473,7 @@ int  arpc_disconnection(struct arpc_connection *con, int64_t timeout_s)
 	ret = arpc_cond_lock(&con->cond);
 	LOG_THEN_RETURN_VAL_IF_TRUE(ret, ARPC_ERROR, "arpc_cond_lock fail, maybe free already.");
 	ARPC_LOG_NOTICE("conn[%u][%p] will be closed.", con->id, con);
-	if(con->xio_con && con->status == XIO_STA_RUN_ACTION){
+	if(con->xio_con && con->status == XIO_STA_RUN_ACTIVE){
 		con->status = XIO_STA_CLEANUP;
 		xio_disconnect(con->xio_con);
 		if(timeout_s){
@@ -991,12 +1005,12 @@ int arpc_session_async_send(struct arpc_connection *conn, struct arpc_common_msg
 
 	ret = arpc_cond_lock(&conn->cond);
 	LOG_THEN_RETURN_VAL_IF_TRUE(ret, ARPC_ERROR, "arpc_cond_lock conn[%u][%p] fail.", conn->id, conn);
-	LOG_THEN_GOTO_TAG_IF_VAL_TRUE((conn->status != XIO_STA_RUN_ACTION), unlock, "connoection on cleaning up");
+	LOG_THEN_GOTO_TAG_IF_VAL_TRUE((conn->status != XIO_STA_RUN_ACTIVE), unlock, "connoection on cleaning up");
 
 	ret = check_xio_msg_valid(conn, &msg->tx_msg->out);
 	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, unlock, "check msg invalid.");
 
-	while((conn->tx_msg_num > ARPC_CONN_TX_MAX_DEPTH) && (conn->status == XIO_STA_RUN_ACTION)){
+	while((conn->tx_msg_num > ARPC_CONN_TX_MAX_DEPTH) && (conn->status == XIO_STA_RUN_ACTIVE)){
 		ARPC_LOG_NOTICE("con is busy, tx_msg_num[%lu] wait release,", conn->tx_msg_num);
 		ret = arpc_cond_wait_timeout(&conn->cond, 1 + 2*conn->tx_msg_num);
 		LOG_ERROR_IF_VAL_TRUE(ret, "conn[%u][%p], xio con[%p] wait timeout to coninue.", conn->id, conn, conn->xio_con);

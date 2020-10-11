@@ -68,7 +68,7 @@ int server_session_event(struct xio_session *session, struct xio_session_event_d
 			con->xio_con = event_data->conn;
 			con->server.work = work;
 			con->xio_con_ctx = work->work_ctx;
-			con->status = XIO_STA_RUN_ACTION;
+			con->status = XIO_STA_RUN_ACTIVE;
 
 			ret = arpc_add_tx_event_to_conn(con);
 			LOG_ERROR_IF_VAL_TRUE(ret, "add conn event fail....");
@@ -95,8 +95,18 @@ int server_session_event(struct xio_session *session, struct xio_session_event_d
 			}
 			break;
 		case XIO_SESSION_TEARDOWN_EVENT:
+			arpc_cond_lock(&session_fd->cond);
+			session_fd->is_close = 1;
+			session_fd->status = XIO_SES_STA_CLOSE;
+
 			xio_session_destroy(session);
 			ARPC_LOG_NOTICE("##### session[%p] teardown.", session_fd);
+
+			session_fd->xio_s = NULL;
+			arpc_cond_notify_all(&session_fd->cond);
+			arpc_cond_unlock(&session_fd->cond);
+
+			arpc_cond_lock(&session_fd->cond);
 			ret = server_remove_session(session_ctx->server, session_fd);
 			LOG_ERROR_IF_VAL_TRUE(ret, "server_insert_session fail.");
 			if(session_ctx->server->session_teardown){
@@ -105,6 +115,7 @@ int server_session_event(struct xio_session *session, struct xio_session_event_d
 															session_fd->usr_context);
 				LOG_ERROR_IF_VAL_TRUE(ret, "user session_teardown fail.");
 			}
+			arpc_cond_unlock(&session_fd->cond);
 			ret = arpc_destroy_session(session_fd, 0);
 			LOG_ERROR_IF_VAL_TRUE(ret, "arpc_destroy_session fail.");
 			break;
@@ -184,7 +195,7 @@ int server_on_new_session(struct xio_session *session,struct xio_new_session_req
 
 	ret = xio_modify_session(session, &attr, XIO_SESSION_ATTR_USER_CTX);
 	LOG_THEN_GOTO_TAG_IF_VAL_TRUE((ret != ARPC_SUCCESS), reject, "xio_modify_session fail.");
-
+	new_session->status = XIO_SES_STA_ACTIVE;
 	if(server_fd->work_num) {
 		uri_vec = ARPC_MEM_ALLOC(server_fd->work_num * sizeof(char *), NULL);
 		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!uri_vec, reject, "ARPC_MEM_ALLOC fail.");
@@ -227,7 +238,7 @@ int client_session_established(struct xio_session *session, struct xio_new_sessi
 {
 	SESSION_CTX(session_ctx, session_context);
 	arpc_cond_lock(&session_ctx->cond);
-	session_ctx->is_close = 0;
+	session_ctx->status = XIO_SES_STA_ACTIVE;
 	ARPC_LOG_NOTICE("established session.");
 	arpc_cond_notify_all(&session_ctx->cond);
 	arpc_cond_unlock(&session_ctx->cond);
@@ -250,9 +261,10 @@ int client_session_event(struct xio_session *session, struct xio_session_event_d
 		case XIO_SESSION_TEARDOWN_EVENT:
 			xio_session_destroy(session);
 			arpc_cond_lock(&session_ctx->cond);
+			session_ctx->xio_s = NULL;
 			if (session_ctx->is_close) {
 				ARPC_LOG_NOTICE("tear down session.");
-				session_ctx->is_close++;
+				session_ctx->status = XIO_SES_STA_CLOSE;
 				arpc_cond_notify_all(&session_ctx->cond);
 				arpc_cond_unlock(&session_ctx->cond);
 				break;
@@ -273,23 +285,25 @@ int client_session_event(struct xio_session *session, struct xio_session_event_d
 			ret = arpc_add_tx_event_to_conn(con_ctx);
 			LOG_ERROR_IF_VAL_TRUE(ret, "add conn event fail....");
 
-			con_ctx->status = XIO_STA_RUN_ACTION;
+			con_ctx->status = XIO_STA_RUN_ACTIVE;
 			con_ctx->client.recon_interval_s = 0;
 			con_ctx->is_busy = 0;
 			arpc_cond_notify(&con_ctx->cond);
 			ARPC_LOG_NOTICE(" build connection[%u][%p] success!.", con_ctx->id, event_data->conn);
 			arpc_cond_unlock(&con_ctx->cond);
 
+			// 通知唤醒等待session可用的进程
 			arpc_cond_lock(&session_ctx->cond);
 			arpc_cond_notify(&session_ctx->cond);
 			arpc_cond_unlock(&session_ctx->cond);
 			break;
 		case XIO_SESSION_CONNECTION_TEARDOWN_EVENT: // conn断开，需要释放con资源
-			if (event_data->conn)
+			if (event_data->conn){
 				xio_connection_destroy(event_data->conn);
+			}
 			ret = arpc_cond_lock(&con_ctx->cond);
 			LOG_ERROR_IF_VAL_TRUE(ret, "arpc_cond_lock fail....");
-			if(con_ctx->status == XIO_STA_RUN_ACTION){
+			if(con_ctx->status == XIO_STA_RUN_ACTIVE){
 				ret = arpc_del_tx_event_to_conn(con_ctx);
 				LOG_ERROR_IF_VAL_TRUE(ret, "arpc_del_tx_event_to_conn fail....");
 				ARPC_LOG_ERROR("some error, connection[%u][%p] tear down! retry connection", con_ctx->id, event_data->conn);
