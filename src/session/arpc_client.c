@@ -85,14 +85,14 @@ arpc_session_handle_t arpc_client_create_session(const struct arpc_client_sessio
 	session->msg_head_max_len = (param->opt.msg_head_max_len && param->opt.msg_head_max_len <= (1024))?
 								param->opt.msg_head_max_len:
 								(MAX_HEADER_DATA_LEN);
-	ARPC_LOG_NOTICE("session->msg_iov_max_len:%u", session->msg_iov_max_len);
-	ARPC_LOG_NOTICE("session->msg_data_max_len:%lu", session->msg_data_max_len);
-	ARPC_LOG_NOTICE("session->msg_head_max_len:%u", session->msg_head_max_len);
+	//ARPC_LOG_NOTICE("session->msg_iov_max_len:%u", session->msg_iov_max_len);
+	//ARPC_LOG_NOTICE("session->msg_data_max_len:%lu", session->msg_data_max_len);
+	//ARPC_LOG_NOTICE("session->msg_head_max_len:%u", session->msg_head_max_len);
 
 	idle_thread_num = tp_get_pool_idle_num(session->threadpool);
 	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(idle_thread_num < ARPC_MIN_THREAD_IDLE_NUM, error_2, "idle_thread_num[%u] is low 2.", idle_thread_num);
 
-	ARPC_LOG_NOTICE("Max idle thread num[%u], user expact max num[%u], rx num[%u].", idle_thread_num, param->con_num, param->rx_con_num);
+	//ARPC_LOG_NOTICE("Max idle thread num[%u], user expact max num[%u], rx num[%u].", idle_thread_num, param->con_num, param->rx_con_num);
 	idle_thread_num = idle_thread_num - ARPC_MIN_THREAD_IDLE_NUM;
 	idle_thread_num = (param->con_num && param->con_num < idle_thread_num)? param->con_num : idle_thread_num; // 默认是两个链接
 
