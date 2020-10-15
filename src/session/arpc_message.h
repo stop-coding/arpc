@@ -28,6 +28,9 @@
 #include "arpc_com.h"
 #include "arpc_session.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 struct arpc_msg_ex {
     struct xio_msg				x_req_msg;

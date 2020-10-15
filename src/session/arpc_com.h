@@ -86,120 +86,97 @@ do{\
 // 互斥锁
 struct arpc_mutex{
   pthread_mutex_t     lock;	    			/* lock */
-  uint8_t is_inited;
 };
 
 inline static int arpc_mutex_init(struct arpc_mutex *m)
 {
-	LOG_THEN_RETURN_VAL_IF_TRUE(pthread_mutex_init(&m->lock, NULL), ARPC_ERROR, "mutex initialize fail.");
-	m->is_inited = 1;
-	return ARPC_SUCCESS;
+	return pthread_mutex_init(&m->lock, NULL);
 }
 
 inline static int arpc_mutex_lock(struct arpc_mutex *m)
 {
-	LOG_THEN_RETURN_VAL_IF_TRUE(!m->is_inited, ARPC_ERROR, "lock have not inited.");
 	return pthread_mutex_lock(&m->lock);
 }
 
 inline static int arpc_mutex_trylock(struct arpc_mutex *m)
 {
-	LOG_THEN_RETURN_VAL_IF_TRUE(!m->is_inited, ARPC_ERROR, "lock have not inited.");
 	return pthread_mutex_trylock(&m->lock);
 }
 
 inline static int arpc_mutex_unlock(struct arpc_mutex *m)
 {
-	LOG_THEN_RETURN_VAL_IF_TRUE(!m->is_inited, ARPC_ERROR, "lock have not inited.");
 	return pthread_mutex_unlock(&m->lock);
 }
 
 inline static int arpc_mutex_destroy(struct arpc_mutex *m)
 {
-	return m->is_inited ? pthread_mutex_destroy(&m->lock): 0;
+	return pthread_mutex_destroy(&m->lock);
 }
 
 // 读写锁
 struct arpc_rwlock{
   pthread_rwlock_t lock;	    			/* lock */
-  uint8_t is_inited;
 };
 
 inline static int arpc_rwlock_init(struct arpc_rwlock *rw)
 {
-	LOG_THEN_RETURN_VAL_IF_TRUE(pthread_rwlock_init(&rw->lock, NULL), ARPC_ERROR, "rwlock initialize fail.");
-	rw->is_inited = 1;
-	return 0;
+	return pthread_rwlock_init(&rw->lock, NULL);
 }
 
 inline static int arpc_rwlock_rdlock(struct arpc_rwlock *rw)
 {
-	LOG_THEN_RETURN_VAL_IF_TRUE(!rw->is_inited, ARPC_ERROR, "rwlock have not inited.");
 	return pthread_rwlock_rdlock(&rw->lock);
 }
 
 inline static int arpc_rwlock_tryrdlock(struct arpc_rwlock *rw)
 {
-	LOG_THEN_RETURN_VAL_IF_TRUE(!rw->is_inited, ARPC_ERROR, "rwlock have not inited.");
 	return pthread_rwlock_tryrdlock(&rw->lock);
 }
 
 inline static int arpc_rwlock_wrlock(struct arpc_rwlock *rw)
 {
-	LOG_THEN_RETURN_VAL_IF_TRUE(!rw->is_inited, ARPC_ERROR, "rwlock have not inited.");
 	return pthread_rwlock_wrlock(&rw->lock);
 }
 
 inline static int arpc_rwlock_trywrlock(struct arpc_rwlock *rw)
 {
-	LOG_THEN_RETURN_VAL_IF_TRUE(!rw->is_inited, ARPC_ERROR, "rwlock have not inited.");
 	return pthread_rwlock_trywrlock(&rw->lock);
 }
 
 inline static int arpc_rwlock_unlock(struct arpc_rwlock *rw)
 {
-	LOG_THEN_RETURN_VAL_IF_TRUE(!rw->is_inited, ARPC_ERROR, "rwlock have not inited.");
 	return pthread_rwlock_unlock(&rw->lock);
 }
 
 inline static int arpc_rwlock_destroy(struct arpc_rwlock *rw)
 {
-	return rw->is_inited ? pthread_rwlock_destroy(&rw->lock): 0;
+	return pthread_rwlock_destroy(&rw->lock);
 }
 
 // 信号量
 struct arpc_cond{
   pthread_cond_t cond;	    			/* cond */
   pthread_mutex_t     lock;	    			/* lock */
-  uint8_t is_inited;
-  uint8_t is_lock;
 };
 
 inline static int arpc_cond_init(struct arpc_cond *cond)
 {
-	LOG_THEN_RETURN_VAL_IF_TRUE(cond->is_inited, -1, "rwlock have inited.");
 	pthread_mutex_init(&cond->lock, NULL); /* 初始化互斥锁 */
-	pthread_cond_init(&cond->cond, NULL);	 /* 初始化条件变量 */
-	cond->is_inited = 1;
-	cond->is_lock = 0;
-	return 0;
+	return pthread_cond_init(&cond->cond, NULL);
 }
 
 inline static int arpc_cond_lock(struct arpc_cond *cond)
 {
-	LOG_THEN_RETURN_VAL_IF_TRUE(!cond->is_inited, -1, "cond have not inited.");
-	return pthread_mutex_lock(&cond->lock);;
+	return pthread_mutex_lock(&cond->lock);
 }
 
 inline static int arpc_cond_trylock(struct arpc_cond *cond)
 {
-	LOG_THEN_RETURN_VAL_IF_TRUE(!cond->is_inited, -1, "cond have not inited.");
 	return pthread_mutex_trylock(&cond->lock);
 }
 
 inline static int arpc_cond_unlock(struct arpc_cond *cond)
 {
-	LOG_THEN_RETURN_VAL_IF_TRUE(!cond->is_inited, -1, "cond have not inited.");
 	return pthread_mutex_unlock(&cond->lock);
 }
 
@@ -210,8 +187,6 @@ inline static int arpc_cond_wait_timeout(struct arpc_cond *cond, uint64_t timeou
 	struct timeval now;
 	uint64_t nsec;
 
-	LOG_THEN_RETURN_VAL_IF_TRUE(!cond->is_inited, -1, "cond have not inited.");
-
 	gettimeofday(&now, NULL);	// 线程安全
 	nsec = now.tv_usec * 1000 + (timeout_ms % 1000) * 1000000;
 	abstime.tv_sec=now.tv_sec + nsec / 1000000000 + timeout_ms / 1000;
@@ -221,29 +196,23 @@ inline static int arpc_cond_wait_timeout(struct arpc_cond *cond, uint64_t timeou
 
 inline static int arpc_cond_wait(struct arpc_cond *cond)
 {
-	LOG_THEN_RETURN_VAL_IF_TRUE(!cond->is_inited, -1, "cond have not inited.");
 	return pthread_cond_wait(&cond->cond, &cond->lock);
 }
 
 inline static int arpc_cond_notify(struct arpc_cond *cond)
 {
-	LOG_THEN_RETURN_VAL_IF_TRUE(!cond->is_inited, -1, "cond have not inited.");
 	return pthread_cond_signal(&cond->cond);
 }
 
 inline static int arpc_cond_notify_all(struct arpc_cond *cond)
 {
-	LOG_THEN_RETURN_VAL_IF_TRUE(!cond->is_inited, -1, "cond have not inited.");
 	return pthread_cond_broadcast(&cond->cond);;
 }
 
 inline static int arpc_cond_destroy(struct arpc_cond *cond)
 {
-	LOG_THEN_RETURN_VAL_IF_TRUE(!cond->is_inited, -1, "cond have not inited.");
 	pthread_cond_destroy(&cond->cond);
 	pthread_mutex_destroy(&cond->lock);
-	cond->is_inited = 0;
-	cond->is_lock = 0;
 	return 0;
 }
 

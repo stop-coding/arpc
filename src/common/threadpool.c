@@ -240,17 +240,39 @@ error_1:
 	return NULL;
 }
 
+static inline void tp_usleep(uint64_t us)
+{
+	struct timeval time;
+	if(!us){
+		return;
+	}
+	time.tv_sec = 0;
+	time.tv_usec = us;
+	select(0, NULL, NULL, NULL, &time);
+	return;
+}
+
 int tp_destroy_thread_pool(tp_handle *fd)
 {
 	uint32_t i;
+	int retry = 3;
 	struct _thread_pool_msg *pool = (struct _thread_pool_msg *)(*fd);
 	LOG_THEN_RETURN_VAL_IF_TRUE((!pool), -1,"pool null fail.");
 
 	pthread_mutex_lock(&pool->mutex);
+wait_idle:
 	for (i = 0; i < pool->thread_num; i++){
 		if (!(IS_SET(pool->thread[i].flag, FLAG_TASK_IDLE))){
 			TP_LOG_ERROR("the thread[%lu], work_id[%u] is runing,can't stop it", pool->thread[i].thread_id, i);
-			goto error;
+			if (retry) {
+				retry--;
+				pthread_mutex_unlock(&pool->mutex);
+				tp_usleep(10*1000);
+				pthread_mutex_lock(&pool->mutex);
+				goto wait_idle;
+			}else{
+				goto error;
+			}
 		}
 	}
 	for (i = 0; i < pool->thread_num; i++){

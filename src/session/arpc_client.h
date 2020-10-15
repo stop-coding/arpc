@@ -15,12 +15,11 @@
 * \note none 
 */
 
-#ifndef _ARPC_PROCESS_RSP_H
-#define _ARPC_PROCESS_RSP_H
+#ifndef _ARPC_CLIENT_H
+#define _ARPC_CLIENT_H
 
 #include <stdio.h>
 #include <string.h>
-#include <inttypes.h>
 #include <assert.h>
 #include <sys/time.h>
 
@@ -32,8 +31,7 @@
 extern "C" {
 #endif
 
-int process_rsp_header(struct xio_msg *rsp, struct arpc_connection *con);
-int process_rsp_data(struct xio_msg *rsp, int last_in_rxq, struct arpc_connection *con);
+
 
 #ifdef __cplusplus
 }

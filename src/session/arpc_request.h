@@ -28,6 +28,10 @@
 #include "arpc_com.h"
 #include "arpc_session.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 struct arpc_oneway_handle {
 	struct xio_msg				x_req_msg;
     struct arpc_vmsg	        *send;

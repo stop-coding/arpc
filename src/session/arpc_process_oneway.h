@@ -28,6 +28,9 @@
 #include "arpc_com.h"
 #include "arpc_session.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 int process_oneway_header(struct xio_msg *msg, struct oneway_ops *ops, uint64_t iov_max_len, void *usr_ctx);
 int process_oneway_data(struct xio_msg *req, struct oneway_ops *ops, int last_in_rxq, void *usr_ctx);

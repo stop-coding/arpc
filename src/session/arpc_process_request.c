@@ -131,8 +131,8 @@ do_respone:
 	ret = arpc_init_response(rsp_hanlde);
 	LOG_ERROR_IF_VAL_TRUE(ret, "arpc_init_response fail.");
 	if(!ret){
-		ret = arpc_session_async_send(rsp_hanlde->conn, rsp_hanlde);
-		LOG_ERROR_IF_VAL_TRUE(ret, "arpc_session_async_send fail.");
+		ret = arpc_connection_async_send(rsp_hanlde->conn, rsp_hanlde);
+		LOG_ERROR_IF_VAL_TRUE(ret, "arpc_connection_async_send fail.");
 	}
 	return ret;
 }
@@ -171,7 +171,7 @@ static int request_msg_async_deal(void *usr_ctx)
 		ret = arpc_init_response(rsp_fd);
 		LOG_ERROR_IF_VAL_TRUE(ret, "arpc_do_respone fail.");
 		if(!ret){
-			ret = arpc_session_async_send(rsp_fd->conn, rsp_fd);
+			ret = arpc_connection_async_send(rsp_fd->conn, rsp_fd);
 			LOG_ERROR_IF_VAL_TRUE(ret, "arpc_do_respone fail.");
 		}
 	}

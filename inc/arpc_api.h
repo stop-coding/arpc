@@ -422,6 +422,7 @@ struct arpc_client_session_param {
 	struct arpc_con_info  		con;								/*! @brief 每个连接的传输类型和参数 */
 	uint32_t					con_num;							/*! @brief 连接数量 包括读和写连接通道总数*/
 	uint32_t					rx_con_num;							/*! @brief 接收通道数量，用于读写分离，0默认为不读写分离*/
+	int64_t						timeout_ms;							/*! @brief 链路保持时长，-1是永久保持。如果该时间内无数据交互，则session会关闭通道*/
 	struct arpc_session_ops		*ops;								/*! @brief 回调函数 */
 	void 						*ops_usr_ctx;						/*! @brief 调用者的上下文参数，用于操作函数入参 */
 	uint32_t					req_data_len;						/*! @brief 申请session时的数据 */
@@ -448,19 +449,11 @@ arpc_session_handle_t arpc_client_create_session(const struct arpc_client_sessio
  */
 int arpc_client_destroy_session(arpc_session_handle_t *fd);
 
-/**
- * @brief  session状态枚举
- *
- * @details
- *  	用于获取session状态
- */
-enum arpc_session_status {
-	ARPC_SESSION_STA_NOT_EXISTED = -1,							/*! @brief session不存在或者已经释放 */
-	ARPC_SESSION_STA_ACTIVE = 0,								/*! @brief 正常活跃 */
-	ARPC_SESSION_STA_RE_CON,									/*! @brief 断路，尝试重连 */
-	ARPC_SESSION_STA_WAIT,										/*! @brief 断路，周期尝试重连 */
+enum arpc_session_status{
+	ARPC_SES_STA_INIT = 0, 	 //初始化
+	ARPC_SES_STA_ACTIVE, 	 //活跃
+	ARPC_SES_STA_CLOSE,  //关闭
 };
-
 /*!
  *  @brief  获取session状态
  *

@@ -39,7 +39,6 @@ int arpc_do_request(const arpc_session_handle_t fd, struct arpc_msg *msg, int32_
 	int ret = ARPC_ERROR;
 	struct arpc_common_msg *req_msg = NULL;
 	struct arpc_msg *rev_msg;
-	struct arpc_connection *con;
 	uint32_t send_cnt;
 	struct arpc_msg_ex *ex_msg;
 	struct arpc_request_handle *req_fd;
@@ -70,16 +69,10 @@ int arpc_do_request(const arpc_session_handle_t fd, struct arpc_msg *msg, int32_
 	arpc_cond_lock(&req_msg->cond);
 	while(send_cnt < 1) {
 		send_cnt++;
-		ret = session_get_conn(session_ctx, &con, timeout_ms);
-		if (ret || !con) {
-			ARPC_LOG_ERROR("session[%p] wait idle connection timeout.", session_ctx);
-			ret = ARPC_ERROR;
-			break;
-		}
-		ret = arpc_session_async_send(con, req_msg);
+		ret = session_async_send(session_ctx, req_msg, timeout_ms);
 		if(ret){
-			ARPC_LOG_ERROR("xio_send_request fail, conn[%u][%p], xio con[%p].",con->id, con, con->xio_con);
 			ret = ARPC_ERROR;
+			ARPC_LOG_ERROR("session[%p] send fail or timeout.", session_ctx);
 			continue;
 		}
 		ret = 0;
@@ -99,7 +92,7 @@ int arpc_do_request(const arpc_session_handle_t fd, struct arpc_msg *msg, int32_
 			arpc_cond_unlock(&req_msg->cond);
 			arpc_destroy_common_msg(req_msg);
 		}else{
-			ARPC_LOG_ERROR("wait con[%u][%p] rx respone of request fail.", con->id, con);
+			ARPC_LOG_ERROR("wait msg rx respone of request fail.");
 			ex_msg->x_rsp_msg = NULL;
 			MSG_CLR_REQ(ex_msg->flags);
 			arpc_cond_unlock(&req_msg->cond);
@@ -167,7 +160,6 @@ int arpc_send_oneway_msg(const arpc_session_handle_t fd, struct arpc_vmsg *send,
 	int ret = ARPC_ERROR;
 	struct arpc_common_msg *req_msg = NULL;
 	struct arpc_oneway_handle *ow_msg;
-	struct arpc_connection *con;
 	uint32_t send_cnt = 0;
 
 	LOG_THEN_RETURN_VAL_IF_TRUE((!session_ctx), ARPC_ERROR, "arpc_session_handle_t fd null, exit.");
@@ -192,19 +184,12 @@ int arpc_send_oneway_msg(const arpc_session_handle_t fd, struct arpc_vmsg *send,
 	arpc_cond_lock(&req_msg->cond);
 	while(send_cnt < 1) {
 		send_cnt++;
-		ret = session_get_conn(session_ctx, &con, SEND_ONEWAY_END_MAX_TIME);
-		if (ret || !con) {
-			ARPC_LOG_ERROR("session[%p] wait idle connection timeout.", session_ctx);
-			ret = ARPC_ERROR;
-			break;
-		}
-		ret = arpc_session_async_send(con, req_msg);
-		if(ret){
-			ARPC_LOG_ERROR("xio_send_request fail, conn[%u][%p], xio con[%p].",con->id, con, con->xio_con);
+		ret = session_async_send(session_ctx, req_msg, SEND_ONEWAY_END_MAX_TIME);
+		if (ret) {
+			ARPC_LOG_ERROR("session[%p] send timeout.", session_ctx);
 			ret = ARPC_ERROR;
 			continue;
 		}
-		ret = 0;
 		break;
 	}
 	
@@ -212,7 +197,7 @@ int arpc_send_oneway_msg(const arpc_session_handle_t fd, struct arpc_vmsg *send,
 
 	if (!ow_msg->clean_send_cb){
 		ret = arpc_cond_wait_timeout(&req_msg->cond, SEND_ONEWAY_END_MAX_TIME); // 默认等待
-		LOG_ERROR_IF_VAL_TRUE(ret, "con[%u][%p] wait oneway msg send complete timeout fail.", con->id, con);
+		LOG_ERROR_IF_VAL_TRUE(ret, "wait oneway msg send complete timeout fail.");
 		arpc_cond_unlock(&req_msg->cond);
 		arpc_destroy_common_msg(req_msg);	//un lock
 	}else{

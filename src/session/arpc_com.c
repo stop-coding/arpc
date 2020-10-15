@@ -36,7 +36,7 @@ struct aprc_paramter{
 static struct aprc_paramter g_param= {
 	.is_init        = 0,
 	.thread_pool	= NULL,
-	.mutex			= {.lock = PTHREAD_MUTEX_INITIALIZER,.is_inited = 1},
+	.mutex			= {.lock = PTHREAD_MUTEX_INITIALIZER},
 	.opt			= {
 						.thread_max_num = 10,
 						.cpu_max_num    = 16,
@@ -160,13 +160,21 @@ int arpc_init()
 
 void arpc_finish()
 {
+	int retry = 3;
+	int ret;
 	ARPC_LOG_DEBUG( "arpc_finish.");
 	if (!g_param.is_init){
 		ARPC_LOG_NOTICE( "arpc global init have not done.");
 		return;
 	}
 	g_param.is_init = 0;
-	tp_destroy_thread_pool(&g_param.thread_pool);
+	while(retry--){
+		ret = tp_destroy_thread_pool(&g_param.thread_pool);
+		if(!ret) {
+			break;
+		}
+	}
+
 	xio_shutdown();
 }
 

@@ -39,8 +39,8 @@ static int arpc_process_rsp_data(struct arpc_common_msg *req_msg, struct arpc_co
 	LOG_THEN_RETURN_VAL_IF_TRUE((!con), ARPC_ERROR, "con null.");
 
 	//同步通知数据发送完成
-	ret = arpc_session_send_comp_notify(con, req_msg);
-	LOG_ERROR_IF_VAL_TRUE(ret, "arpc_session_send_comp_notify fail.");
+	ret = arpc_connection_send_comp_notify(con, req_msg);
+	LOG_ERROR_IF_VAL_TRUE(ret, "arpc_connection_send_comp_notify fail.");
 
 	ret = arpc_request_rsp_complete(req_msg);
 	LOG_ERROR_IF_VAL_TRUE(ret, "arpc_request_rsp_complete fail.");

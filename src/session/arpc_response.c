@@ -57,7 +57,7 @@ int arpc_do_response(arpc_rsp_handle_t *rsp_fd, struct arpc_vmsg *rsp_iov, rsp_c
 	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, unlock, "arpc_init_response fail.");
 	arpc_cond_unlock(&arpc_rsp_fd->cond);
 
-	ret = arpc_session_async_send(arpc_rsp_fd->conn, arpc_rsp_fd);
+	ret = arpc_connection_async_send(arpc_rsp_fd->conn, arpc_rsp_fd);
 	LOG_THEN_RETURN_VAL_IF_TRUE(ret, ARPC_ERROR, "arpc_session_send_response fail.");
 
 	*rsp_fd = NULL;

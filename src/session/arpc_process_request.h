@@ -28,6 +28,9 @@
 #include "arpc_com.h"
 #include "arpc_session.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 int process_request_header(struct arpc_connection *con, struct xio_msg *msg, struct request_ops *ops, uint64_t iov_max_len, void *usr_ctx);
 int process_request_data(struct arpc_connection *con, struct xio_msg *req, struct request_ops *ops, int last_in_rxq, void *usr_ctx);

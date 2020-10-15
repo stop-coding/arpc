@@ -975,8 +975,8 @@ int xio_tcp_xmit(struct xio_tcp_transport *tcp_hndl)
 	    tcp_hndl->tx_comp_cnt > COMPLETION_BATCH_MAX ||
 	    tcp_hndl->state != XIO_TRANSPORT_STATE_CONNECTED) {
 		xio_set_error(XIO_EAGAIN);
-		ERROR_LOG(" xio err tx_comp_cnt:%u, state:%d, tx_ready_tasks_num:%d\n", 
-					tcp_hndl->tx_comp_cnt, tcp_hndl->state, tcp_hndl->tx_ready_tasks_num);
+		//ERROR_LOG(" xio err tx_comp_cnt:%u, state:%d, tx_ready_tasks_num:%d\n", 
+		//			tcp_hndl->tx_comp_cnt, tcp_hndl->state, tcp_hndl->tx_ready_tasks_num);
 		return -1;
 	}
 
