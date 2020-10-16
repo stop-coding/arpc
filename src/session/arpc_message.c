@@ -81,7 +81,7 @@ int arpc_delete_msg(struct arpc_msg **msg)
 		return -1;
 	}
 
-	if (ex_msg->x_rsp_msg && IS_SET(ex_msg->flags, XIO_MSG_RSP)) {
+	if (IS_SET(ex_msg->flags, XIO_MSG_RSP)) {
 		release_rsp_msg_buf(free_msg);
 	}
 	if(free_msg->clean_send_cb){
@@ -105,7 +105,7 @@ int arpc_reset_msg(struct arpc_msg *msg)
 		return -1;
 	}
 
-	if (ex_msg->x_rsp_msg && IS_SET(ex_msg->flags, XIO_MSG_RSP)) {
+	if (IS_SET(ex_msg->flags, XIO_MSG_RSP)) {
 		release_rsp_msg_buf(msg);
 	}
 	ex_msg->flags = 0;
@@ -160,15 +160,17 @@ data_null:
 void release_arpc2xio_msg(struct xio_vmsg *xio_msg)
 {
 	struct xio_msg 	*req = NULL;
-	if ((xio_msg->pad) && (xio_msg->sgl_type == XIO_SGL_TYPE_IOV_PTR) && xio_msg->pdata_iov.sglist){
+	if ((xio_msg->pad) && xio_msg->pdata_iov.sglist){
 		SAFE_FREE_MEM(xio_msg->pdata_iov.sglist);
+		xio_msg->pad = 0;
 	}
+	
 	return;
 }
 
 int conver_msg_xio_to_arpc(const struct xio_vmsg *xio_msg, struct arpc_vmsg *msg)
 {
-	const struct xio_iovec_ex	*sglist = NULL;
+	const struct xio_iovec_ex  *sglist = NULL;
 	uint32_t			nents = 0;
 	uint32_t 			i;
 	int 				ret = -1;
@@ -202,8 +204,13 @@ int conver_msg_xio_to_arpc(const struct xio_vmsg *xio_msg, struct arpc_vmsg *msg
 		}
 	}else if (nents && (xio_msg->sgl_type == XIO_SGL_TYPE_IOV_PTR)){
 		// 自定义buf，结构体可以强制转换
-		sglist = vmsg_base_sglist(xio_msg);
-		msg->vec = (struct arpc_iov *)sglist;
+		sglist = vmsg_sglist(xio_msg);
+		msg->vec = (struct arpc_iov *)ARPC_MEM_ALLOC(nents * sizeof(struct arpc_iov), NULL);
+		for(i = 0; i < nents; i++){
+			msg->vec[i].data = sglist[i].iov_base;
+			msg->vec[i].len	= sglist[i].iov_len;
+			msg->total_data +=msg->vec[i].len;
+		}
 		msg->vec_num = nents;
 		msg->vec_type = ARPC_VEC_TYPE_PRT;
 	}else{
@@ -230,6 +237,7 @@ void release_xio2arpc_msg(struct arpc_vmsg *msg)
 		msg->vec_num =0;
 		msg->total_data =0;
 	}
+	SAFE_FREE_MEM(msg->head);
 	return;
 }
 
@@ -243,12 +251,10 @@ int free_receive_msg_buf(struct arpc_msg *msg)
 	LOG_THEN_RETURN_VAL_IF_TRUE(!msg->receive.vec_num, ARPC_ERROR, "receive vec null.");
 	LOG_THEN_RETURN_VAL_IF_TRUE(msg->receive.vec_type != ARPC_VEC_TYPE_PRT, ARPC_ERROR, "vec_type invalid.");
 	ex_msg = (struct arpc_msg_ex*)msg->handle;
-	ARPC_LOG_DEBUG("to free iov buf, num:%u.", msg->receive.vec_num);
 	if(IS_SET(ex_msg->flags, XIO_RSP_IOV_ALLOC_BUF)){
 		for (i = 0; i < msg->receive.vec_num; i++) {
 			if (msg->receive.vec[i].data)
 				ex_msg->free_cb(msg->receive.vec[i].data, ex_msg->usr_context);
-			msg->receive.vec[i].data =NULL;
 		}
 		SAFE_FREE_MEM(msg->receive.vec);
 	}
@@ -257,7 +263,7 @@ int free_receive_msg_buf(struct arpc_msg *msg)
 }
 int alloc_xio_msg_usr_buf(struct xio_msg *msg, struct arpc_msg *arpc_msg)
 {
-	struct xio_iovec	*sglist;
+	struct xio_iovec_ex	*sglist;
 	uint32_t			nents = 0;
 	uint32_t flags = 0;
 	uint32_t i;
@@ -269,11 +275,12 @@ int alloc_xio_msg_usr_buf(struct xio_msg *msg, struct arpc_msg *arpc_msg)
 	LOG_THEN_RETURN_VAL_IF_TRUE((!msg->in.header.iov_len), -1, "header len is 0.");
 
 	ex_msg = (struct arpc_msg_ex*)arpc_msg->handle;
+	
 	// 分配内存
 	last_size = msg->in.total_data_len%ex_msg->iov_max_len;
 	nents = (last_size)? 1: 0;
 	nents += (msg->in.total_data_len / ex_msg->iov_max_len);
-	sglist = (struct xio_iovec* )ARPC_MEM_ALLOC(nents * sizeof(struct xio_iovec), NULL);
+	sglist = (struct xio_iovec_ex* )ARPC_MEM_ALLOC(nents * sizeof(struct xio_iovec_ex), NULL);
 	last_size = (last_size)? last_size :ex_msg->iov_max_len;
 	if(!nents){
 		goto error;
@@ -288,7 +295,7 @@ int alloc_xio_msg_usr_buf(struct xio_msg *msg, struct arpc_msg *arpc_msg)
 	sglist[i].iov_base = ex_msg->alloc_cb(sglist[i].iov_len, ex_msg->usr_context);
 	ARPC_LOG_DEBUG("i:%u ,data:%p, len:%lu.",i, sglist[i].iov_base, sglist[i].iov_len);
 	// 出参
-	msg->in.data_tbl.sglist = (void*)sglist;
+	msg->in.pdata_iov.sglist = sglist;
 	vmsg_sglist_set_nents(&msg->in, nents);
 	msg->in.sgl_type		= XIO_SGL_TYPE_IOV_PTR;
 	arpc_msg->receive.vec_type = ARPC_VEC_TYPE_PRT;
@@ -313,14 +320,8 @@ error:
 
 static int release_rsp_msg_buf(struct arpc_msg *msg)
 {
-	struct arpc_msg_ex *ex_msg;
 	LOG_THEN_RETURN_VAL_IF_TRUE(!msg, ARPC_ERROR, "msg is null.");
-
-	ex_msg = (struct arpc_msg_ex*)msg->handle;
-	if (ex_msg->x_rsp_msg) {
-		free_receive_msg_buf(msg);
-		release_xio2arpc_msg(&msg->receive);
-	}
-	
+	free_receive_msg_buf(msg);
+	release_xio2arpc_msg(&msg->receive);
 	return 0;
 }

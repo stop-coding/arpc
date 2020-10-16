@@ -86,7 +86,6 @@ void *arpc_get_ops_ctx(struct arpc_connection *con);
 int arpc_lock_connection(struct arpc_connection *con);
 int arpc_unlock_connection(struct arpc_connection *con);
 
-int arpc_connection_async_send_nolck(struct arpc_connection *conn, struct arpc_common_msg  *msg);
 int arpc_check_connection_valid(struct arpc_connection *conn);
 
 int arpc_connection_async_send(struct arpc_connection *conn, struct arpc_common_msg  *msg);

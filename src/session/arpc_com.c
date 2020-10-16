@@ -305,6 +305,7 @@ int create_xio_msg_usr_buf(struct xio_msg *msg, struct proc_header_func *ops, ui
 		ARPC_LOG_DEBUG("discard data, total_data_len[%lu].", msg->in.total_data_len);
 		return ARPC_ERROR;
 	}
+	ARPC_LOG_DEBUG("flag:0x%x, data len:%lu", flag, msg->in.total_data_len);
 	msg->usr_flags = flag;
 	// alloc data buf form user define call back
 	/*if (!IS_SET(msg->usr_flags, METHOD_ALLOC_DATA_BUF)) {
@@ -367,8 +368,9 @@ int destroy_xio_msg_usr_buf(struct arpc_vmsg *rev_iov, mem_free_cb_t free_cb, vo
 		if (rev_iov->vec[i].data)
 			free_cb(rev_iov->vec[i].data, usr_ctx);
 	}
-	if (rev_iov->vec_num && rev_iov->vec)
+	if (rev_iov->vec_num && rev_iov->vec){
 		ARPC_MEM_FREE(rev_iov->vec, NULL);
+	}
 	
 	return 0;
 }

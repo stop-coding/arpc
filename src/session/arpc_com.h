@@ -222,6 +222,7 @@ inline static int arpc_cond_destroy(struct arpc_cond *cond)
 
 #define XIO_MSG_FLAG_ALLOC_IOV_MEM 	8
 
+#define ARPC_MINI_IO_DATA_MAX_LEN   (2*1024)
 // 最小空闲的线程数
 #define ARPC_MIN_THREAD_IDLE_NUM    4
 

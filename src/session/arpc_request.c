@@ -119,7 +119,7 @@ int arpc_request_rsp_complete(struct arpc_common_msg *req_msg)
 {
 	int ret;
 	struct arpc_request_handle *req_msg_ex;
-	struct xio_iovec_ex *out_addr;
+	struct xio_iovec_ex *sglist;
 	LOG_THEN_RETURN_VAL_IF_TRUE(!req_msg, ARPC_ERROR, "req_msg null, fail.");
 
 	ret = arpc_cond_lock(&req_msg->cond);
@@ -127,10 +127,13 @@ int arpc_request_rsp_complete(struct arpc_common_msg *req_msg)
 	req_msg_ex = (struct arpc_request_handle *)req_msg->ex_data;
 	
 	if(req_msg_ex->msg_ex->x_rsp_msg){
+		SET_FLAG(req_msg_ex->msg_ex->flags, XIO_MSG_RSP);
 		ret = conver_msg_xio_to_arpc(&req_msg_ex->msg_ex->x_rsp_msg->in, &req_msg_ex->msg->receive);
 		LOG_ERROR_IF_VAL_TRUE(ret, "conver_msg_xio_to_arpc fail");
 		ret = xio_release_response(req_msg_ex->msg_ex->x_rsp_msg);
 		LOG_ERROR_IF_VAL_TRUE(ret, "xio_release_response fail");
+		sglist = vmsg_sglist(&req_msg_ex->msg_ex->x_rsp_msg->in);
+		SAFE_FREE_MEM(sglist);
 		req_msg_ex->msg_ex->x_rsp_msg = NULL;
 	}
 	release_arpc2xio_msg(&req_msg_ex->msg_ex->x_req_msg.out);
@@ -225,6 +228,7 @@ int arpc_oneway_send_complete(struct arpc_common_msg *ow_msg)
 	ret = arpc_cond_lock(&ow_msg->cond);
 	LOG_THEN_RETURN_VAL_IF_TRUE(ret, ARPC_ERROR, "send copmlete cond lock fail, maybe release.");
 	ow_msg_ex = (struct arpc_oneway_handle *)ow_msg->ex_data;
+	release_arpc2xio_msg(&ow_msg->tx_msg->out);
 	if (ow_msg_ex->clean_send_cb){
 		ow_msg_ex->clean_send_cb(ow_msg_ex->send, ow_msg_ex->send_ctx);
 		arpc_cond_unlock(&ow_msg->cond);

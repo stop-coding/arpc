@@ -77,9 +77,6 @@ arpc_session_handle_t arpc_client_create_session(const struct arpc_client_sessio
 		memcpy(client_ctx->private_data, param->req_data, param->req_data_len);
 	}
 
-	session->xio_s = xio_session_create(&client_ctx->xio_param);
-	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!session->xio_s, error_2, "xio_session_create fail.");
-
 	session->msg_iov_max_len  = (param->opt.msg_iov_max_len && param->opt.msg_iov_max_len <= (4*1024))?
 								param->opt.msg_iov_max_len:
 								(IOV_DEFAULT_MAX_LEN);
@@ -113,8 +110,10 @@ arpc_session_handle_t arpc_client_create_session(const struct arpc_client_sessio
 		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!con, destroy_conn, "session_insert_con fail.");
 	}
 
-	ret = arpc_session_connect_for_client(session, 3*1000);//等待至少一条链路可用
-	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, error_2, "session connect timeout....");
+	if (!IS_SET(param->flags, ARPC_SESSION_ARRT_CLIENT_CONNECT_ON_USE)) {
+		ret = arpc_session_connect_for_client(session, 3*1000);//等待至少一条链路可用
+		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, error_2, "client session connect server[%s] fail", client_ctx->uri);
+	}
 
 	ARPC_LOG_NOTICE("Create session[%p] success, work thread num[%u]!!", session, idle_thread_num);
 	return (arpc_session_handle_t)session;
@@ -138,10 +137,13 @@ error_1:
 int arpc_client_destroy_session(arpc_session_handle_t *fd)
 {
 	int ret;
+	struct arpc_client_ctx *client_ctx = NULL;
 	struct arpc_session_handle *session = NULL;
 	LOG_THEN_RETURN_VAL_IF_TRUE(!fd, -1, "client session handle is null fail.");
 
 	session = (struct arpc_session_handle *)(*fd);
+	client_ctx = (struct arpc_client_ctx *)session->ex_ctx;
+	SAFE_FREE_MEM(client_ctx->private_data);
 	ret = arpc_destroy_session(session, CLIENT_DESTROY_SESSION_MAX_TIME);//todo
 	LOG_THEN_RETURN_VAL_IF_TRUE(ret, -1, "arpc_destroy_session[%p] fail.", session);
 	ARPC_LOG_NOTICE( "destroy session[%p] success.", session);
@@ -168,14 +170,14 @@ static int client_session_event(struct xio_session *session, struct xio_session_
 	SESSION_CTX(session_ctx, session_context);
 
 	con_ctx = (struct arpc_connection *)event_data->conn_user_context;
-	ARPC_LOG_DEBUG("#### event:%d|%s. reason: %s.", event_data->event,
+	ARPC_LOG_NOTICE("#### event:%d|%s. reason: %s.", event_data->event,
 					xio_session_event_str(event_data->event), 
 					xio_strerror(event_data->reason));
 	
 	switch (event_data->event) {
 		case XIO_SESSION_TEARDOWN_EVENT:
 			xio_session_destroy(session);
-			ret = session_rebuild_for_client(session_ctx);
+			ret = session_client_teardown_event(session_ctx);
 			if(ret) {
 				ARPC_LOG_ERROR("session_rebuild_for_client fail.");
 			}
@@ -198,8 +200,7 @@ static int client_session_event(struct xio_session *session, struct xio_session_
 		case XIO_SESSION_REJECT_EVENT:
 			break;
 		case XIO_SESSION_CONNECTION_REFUSED_EVENT: /**< connection refused event*/
-			ARPC_LOG_NOTICE(" build connection[%p] refused!.", event_data->conn);
-			xio_connection_destroy(event_data->conn);
+			ARPC_LOG_ERROR(" build connection[%u] refused!.", con_ctx->id);
 			break;
 		case XIO_SESSION_ERROR_EVENT:
 			break;

@@ -70,6 +70,7 @@ int process_request_data(struct arpc_connection *con, struct xio_msg *req, struc
 	usr_rsp_param.rsp_fd = (void *)rsp_hanlde;
 
 	if(IS_SET(req->usr_flags, METHOD_ARPC_PROC_SYNC) && ops->proc_data_cb){
+		ARPC_LOG_DEBUG("set sync proc_data_cb data.");
 		ret = ops->proc_data_cb(&rev_iov, &usr_rsp_param, usr_ctx);
 		LOG_ERROR_IF_VAL_TRUE(ret, "proc_data_cb that define for user is error.");
 		if (!IS_SET(usr_rsp_param.flags, METHOD_CALLER_HIJACK_RX_DATA)) {

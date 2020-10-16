@@ -60,12 +60,16 @@ int process_oneway_data(struct xio_msg *req, struct oneway_ops *ops, int last_in
 	rev_iov.total_data = req->in.total_data_len;
 	rev_iov.vec = NULL;
 
+	if (rev_iov.total_data < ARPC_MINI_IO_DATA_MAX_LEN){
+		//小IO，默认同步执行
+		SET_FLAG(req->usr_flags, METHOD_ARPC_PROC_SYNC);
+	}
+
 	if (IS_SET(req->usr_flags, METHOD_ALLOC_DATA_BUF) && nents) {
 		rev_iov.vec = (struct arpc_iov *)vmsg_base_sglist(&req->in);
 	}
-	if (IS_SET(req->usr_flags, METHOD_ARPC_PROC_SYNC)) {
-		ARPC_LOG_DEBUG("set proc_data_cb data.");
-		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!ops->proc_data_cb, free_data, "proc_data_cb is null.");
+	if (IS_SET(req->usr_flags, METHOD_ARPC_PROC_SYNC) && ops->proc_data_cb) {
+		ARPC_LOG_DEBUG("set sync proc_data_cb data.");
 		ret = ops->proc_data_cb(&rev_iov, &flags, usr_ctx);
 		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, free_data, "proc_data_cb  return fail.");
 
@@ -133,10 +137,9 @@ static int oneway_msg_async_deal(void *usr_ctx)
 
 	ret = async->ops.proc_oneway_async_cb(&async->rev_iov, &flags, async->usr_ctx);
 	LOG_ERROR_IF_VAL_TRUE(ret, "proc_oneway_async_cb error.");
-	if (async->req_msg) {
-		if (!IS_SET(flags, METHOD_CALLER_HIJACK_RX_DATA)){
-			destroy_xio_msg_usr_buf(&async->rev_iov, async->ops.free_cb, async->usr_ctx);
-		}
+
+	if (!IS_SET(flags, METHOD_CALLER_HIJACK_RX_DATA)){
+		destroy_xio_msg_usr_buf(&async->rev_iov, async->ops.free_cb, async->usr_ctx);
 	}
 
 	// free

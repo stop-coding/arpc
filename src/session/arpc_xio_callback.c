@@ -26,7 +26,6 @@
 #include "arpc_process_request.h"
 #include "arpc_process_oneway.h"
 
-
 int msg_head_process(struct xio_session *session, struct xio_msg *msg, void *conn_context)
 {
 	int ret = 0;
@@ -45,6 +44,7 @@ int msg_head_process(struct xio_session *session, struct xio_msg *msg, void *con
 		default:
 			break;
 	}
+
 	return ret;
 }
 

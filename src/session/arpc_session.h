@@ -37,7 +37,7 @@ extern "C" {
 #define SESSION_CTX(session_fd, session_usr_ctx)	\
 struct arpc_session_handle *session_fd = (struct arpc_session_handle *)session_usr_ctx;
 
-#define ARPC_SESSION_ATTR_AUTO_DISCONNECT  (1<<0)
+#define ARPC_SESSION_ATTR_AUTO_DISCONNECT  (15)
 
 enum arpc_session_type{
 	ARPC_SESSION_CLIENT = 0, //
@@ -56,6 +56,7 @@ struct arpc_session_handle{
 	QUEUE     q;
 	QUEUE     q_con;
 	uint32_t 	conn_num;
+	uint32_t 	reconnect_times;
 	uint64_t 	tx_total;
 	void 		*threadpool;
 	enum arpc_session_type type;
@@ -79,7 +80,7 @@ int arpc_destroy_session(struct arpc_session_handle* session, int64_t timeout_ms
 int arpc_session_connect_for_client(struct arpc_session_handle *session, int64_t timeout_ms);
 int arpc_session_disconnect_for_client(struct arpc_session_handle *session, int64_t timeout_ms);
 
-int session_rebuild_for_client(struct arpc_session_handle *session);
+int session_client_teardown_event(struct arpc_session_handle *session);
 int session_established_for_client(struct arpc_session_handle *session);
 int session_notify_wakeup(struct arpc_session_handle *session);
 

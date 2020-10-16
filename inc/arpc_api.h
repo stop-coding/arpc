@@ -187,6 +187,7 @@ typedef int (*mem_free_cb_t)(void* buf_ptr, void* usr_context);
  * @details
  *  	用于请求处理后，设置session主框架参数
  */
+#define IS_METHOD(flag, method) (flag=(flag&(1<<method)))	/*! @brief 是否设置方法 */
 #define SET_METHOD(flag, method) (flag=(flag|(1<<method)))	/*! @brief 设置方法 */
 #define CLR_METHOD(flag, method) (flag=(flag&~(1<<tag)))	/*! @brief 清除方法 */
 #define CLR_ALL_METHOD(flag) (flag=0)						/*! @brief 清除全部方法 */
@@ -412,6 +413,7 @@ int arpc_get_session_opt(const arpc_session_handle_t *ses, struct aprc_session_o
 
 #define MAX_SESSION_REQ_DATA_LEN  1024								/*! @brief 申请session的数据长度 */
 
+#define ARPC_SESSION_ARRT_CLIENT_CONNECT_ON_USE (0)					/*! @brief 只创建不连接，使用时在建立链接 */
 /**
  * @brief  客户端session实例化参数
  *
@@ -423,6 +425,7 @@ struct arpc_client_session_param {
 	uint32_t					con_num;							/*! @brief 连接数量 包括读和写连接通道总数*/
 	uint32_t					rx_con_num;							/*! @brief 接收通道数量，用于读写分离，0默认为不读写分离*/
 	int64_t						timeout_ms;							/*! @brief 链路保持时长，-1是永久保持。如果该时间内无数据交互，则session会关闭通道*/
+	int32_t						flags;								/*! @brief 控制属性设置，具体看枚举值定义 */
 	struct arpc_session_ops		*ops;								/*! @brief 回调函数 */
 	void 						*ops_usr_ctx;						/*! @brief 调用者的上下文参数，用于操作函数入参 */
 	uint32_t					req_data_len;						/*! @brief 申请session时的数据 */
@@ -452,7 +455,9 @@ int arpc_client_destroy_session(arpc_session_handle_t *fd);
 enum arpc_session_status{
 	ARPC_SES_STA_INIT = 0, 	 //初始化
 	ARPC_SES_STA_ACTIVE, 	 //活跃
-	ARPC_SES_STA_CLOSE,  //关闭
+	ARPC_SES_STA_CLOSE,  	 //关闭
+	ARPC_SES_STA_SLEEP,      //休眠
+	ARPC_SES_STA_REBUILD,      //休眠
 };
 /*!
  *  @brief  获取session状态
