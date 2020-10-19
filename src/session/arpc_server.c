@@ -337,8 +337,8 @@ static int server_on_new_session(struct xio_session *session,struct xio_new_sess
 	LOG_THEN_GOTO_TAG_IF_VAL_TRUE((ret != ARPC_SUCCESS), reject, "xio_modify_session fail.");
 	new_session->status = ARPC_SES_STA_ACTIVE;
 	if(server_fd->work_num) {
-		uri_vec = ARPC_MEM_ALLOC(server_fd->work_num * sizeof(char *), NULL);
-		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!uri_vec, reject, "ARPC_MEM_ALLOC fail.");
+		uri_vec = arpc_mem_alloc(server_fd->work_num * sizeof(char *), NULL);
+		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!uri_vec, reject, "arpc_mem_alloc fail.");
 		i = 0;
 		QUEUE_FOREACH_VAL(&server_fd->q_work, work_q, 
 		{
@@ -353,7 +353,7 @@ static int server_on_new_session(struct xio_session *session,struct xio_new_sess
 		});
 
 		xio_accept(session, uri_vec, server_fd->work_num, param.rsp_data, param.rsp_data_len); 
-		ARPC_MEM_FREE(uri_vec, NULL);
+		arpc_mem_free(uri_vec, NULL);
 		uri_vec = NULL;
 	}else{
 		xio_accept(session, NULL, 0, param.rsp_data, param.rsp_data_len); 
@@ -380,7 +380,7 @@ struct arpc_server_handle *arpc_create_server(uint32_t ex_ctx_size)
 	int i =0;
 	struct arpc_server_handle *svr = NULL;
 	/* handle*/
-	svr = (struct arpc_server_handle *)ARPC_MEM_ALLOC(sizeof(struct arpc_server_handle) + ex_ctx_size, NULL);
+	svr = (struct arpc_server_handle *)arpc_mem_alloc(sizeof(struct arpc_server_handle) + ex_ctx_size, NULL);
 	if (!svr) {
 		ARPC_LOG_ERROR( "malloc error, exit ");
 		return NULL;
@@ -549,7 +549,7 @@ static struct arpc_server_work *arpc_create_work()
 	struct arpc_server_work *work = NULL;
 	
 	/* handle*/
-	work = (struct arpc_server_work *)ARPC_MEM_ALLOC(sizeof(struct arpc_server_work), NULL);
+	work = (struct arpc_server_work *)arpc_mem_alloc(sizeof(struct arpc_server_work), NULL);
 	if (!work) {
 		ARPC_LOG_ERROR( "malloc error, exit ");
 		return NULL;

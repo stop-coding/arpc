@@ -28,12 +28,12 @@
 
 static int release_rsp_msg_buf(struct arpc_msg *msg);
 
-static void *arpc_mem_alloc(uint32_t size, void *usr_context)
+static void *arpc_msg_alloc(uint32_t size, void *usr_context)
 {
 	void *mem = malloc(size);
 	return mem;
 }
-static int arpc_mem_free(void *buf_ptr, void *usr_context)
+static int arpc_msg_free(void *buf_ptr, void *usr_context)
 {
 	if(buf_ptr)
 		free(buf_ptr);
@@ -46,8 +46,8 @@ struct arpc_msg *arpc_new_msg(const struct arpc_msg_param *p)
 	struct arpc_msg_ex *ex_msg = NULL;
 	int ret;
 
-	ret_msg = (struct arpc_msg*)ARPC_MEM_ALLOC(sizeof(struct arpc_msg) + sizeof(struct arpc_msg_ex),NULL);
-	LOG_THEN_RETURN_VAL_IF_TRUE(!ret_msg, NULL, "ARPC_MEM_ALLOC arpc_msg fail.");
+	ret_msg = (struct arpc_msg*)arpc_mem_alloc(sizeof(struct arpc_msg) + sizeof(struct arpc_msg_ex),NULL);
+	LOG_THEN_RETURN_VAL_IF_TRUE(!ret_msg, NULL, "arpc_mem_alloc arpc_msg fail.");
 
 	memset(ret_msg, 0, sizeof(struct arpc_msg) + sizeof(struct arpc_msg_ex));
 	ex_msg = (struct arpc_msg_ex *)ret_msg->handle;
@@ -57,8 +57,8 @@ struct arpc_msg *arpc_new_msg(const struct arpc_msg_param *p)
 		ex_msg->free_cb = p->free_cb;
 		ex_msg->usr_context = p->usr_context;
 	}else{
-		ex_msg->alloc_cb = &arpc_mem_alloc;
-		ex_msg->free_cb = &arpc_mem_free;
+		ex_msg->alloc_cb = &arpc_msg_alloc;
+		ex_msg->free_cb = &arpc_msg_free;
 		ex_msg->usr_context =NULL;
 	}
 	ex_msg->iov_max_len = IOV_DEFAULT_MAX_LEN;
@@ -127,8 +127,8 @@ int conver_msg_arpc_to_xio(const struct arpc_vmsg *usr_msg, struct xio_vmsg	*xio
 	xio_msg->pdata_iov.nents = usr_msg->vec_num;
 	xio_msg->total_data_len = 0;
 	if (xio_msg->pdata_iov.nents) {
-		xio_msg->pdata_iov.sglist = (struct xio_iovec_ex *)ARPC_MEM_ALLOC( usr_msg->vec_num * sizeof(struct xio_iovec_ex), NULL);
-		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!xio_msg->pdata_iov.sglist, data_null, "ARPC_MEM_ALLOC fail.");
+		xio_msg->pdata_iov.sglist = (struct xio_iovec_ex *)arpc_mem_alloc( usr_msg->vec_num * sizeof(struct xio_iovec_ex), NULL);
+		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!xio_msg->pdata_iov.sglist, data_null, "arpc_mem_alloc fail.");
 		memset(xio_msg->pdata_iov.sglist, 0, usr_msg->vec_num * sizeof(struct xio_iovec_ex));
 		xio_msg->pad = 1;
 		for (i =0; i < usr_msg->vec_num; i++){
@@ -182,7 +182,7 @@ int conver_msg_xio_to_arpc(const struct xio_vmsg *xio_msg, struct arpc_vmsg *msg
 	//head deepcopy
 	msg->head_len = xio_msg->header.iov_len;
 	if(msg->head_len){
-		msg->head = ARPC_MEM_ALLOC(xio_msg->header.iov_len, NULL);
+		msg->head = arpc_mem_alloc(xio_msg->header.iov_len, NULL);
 		memcpy(msg->head, xio_msg->header.iov_base, msg->head_len);
 	}else{
 		ARPC_LOG_ERROR("head len is 0.");
@@ -192,7 +192,7 @@ int conver_msg_xio_to_arpc(const struct xio_vmsg *xio_msg, struct arpc_vmsg *msg
 	msg->total_data = xio_msg->total_data_len;
 	if ((xio_msg->sgl_type == XIO_SGL_TYPE_IOV)&& nents) {
 		sglist = vmsg_sglist(xio_msg);
-		msg->vec = (struct arpc_iov *)ARPC_MEM_ALLOC(nents * sizeof(struct arpc_iov), NULL);
+		msg->vec = (struct arpc_iov *)arpc_mem_alloc(nents * sizeof(struct arpc_iov), NULL);
 		msg->vec_type = ARPC_VEC_TYPE_INTER;
 		LOG_THEN_GOTO_TAG_IF_VAL_TRUE((!msg->vec), end,"vec alloc is empty.");
 		msg->vec_num = nents;
@@ -205,7 +205,7 @@ int conver_msg_xio_to_arpc(const struct xio_vmsg *xio_msg, struct arpc_vmsg *msg
 	}else if (nents && (xio_msg->sgl_type == XIO_SGL_TYPE_IOV_PTR)){
 		// 自定义buf，结构体可以强制转换
 		sglist = vmsg_sglist(xio_msg);
-		msg->vec = (struct arpc_iov *)ARPC_MEM_ALLOC(nents * sizeof(struct arpc_iov), NULL);
+		msg->vec = (struct arpc_iov *)arpc_mem_alloc(nents * sizeof(struct arpc_iov), NULL);
 		for(i = 0; i < nents; i++){
 			msg->vec[i].data = sglist[i].iov_base;
 			msg->vec[i].len	= sglist[i].iov_len;
@@ -280,7 +280,7 @@ int alloc_xio_msg_usr_buf(struct xio_msg *msg, struct arpc_msg *arpc_msg)
 	last_size = msg->in.total_data_len%ex_msg->iov_max_len;
 	nents = (last_size)? 1: 0;
 	nents += (msg->in.total_data_len / ex_msg->iov_max_len);
-	sglist = (struct xio_iovec_ex* )ARPC_MEM_ALLOC(nents * sizeof(struct xio_iovec_ex), NULL);
+	sglist = (struct xio_iovec_ex* )arpc_mem_alloc(nents * sizeof(struct xio_iovec_ex), NULL);
 	last_size = (last_size)? last_size :ex_msg->iov_max_len;
 	if(!nents){
 		goto error;
@@ -310,7 +310,7 @@ error_1:
 	}
 error:
 	if (sglist) {
-		ARPC_MEM_FREE(sglist, NULL);
+		arpc_mem_free(sglist, NULL);
 		sglist = NULL;
 	}
 	msg->in.sgl_type		= XIO_SGL_TYPE_IOV;

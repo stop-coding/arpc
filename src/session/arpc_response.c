@@ -92,7 +92,7 @@ int arpc_init_response(struct arpc_common_msg *rsp_fd)
 		if (rsp_iov->vec && rsp_iov->vec_num) {
 			rsp_msg->out.total_data_len  = rsp_iov->total_data;
 			rsp_msg->out.sgl_type = XIO_SGL_TYPE_IOV_PTR;
-			rsp_msg->out.pdata_iov.sglist = ARPC_MEM_ALLOC(rsp_iov->vec_num * sizeof(struct xio_iovec_ex), NULL);
+			rsp_msg->out.pdata_iov.sglist = arpc_mem_alloc(rsp_iov->vec_num * sizeof(struct xio_iovec_ex), NULL);
 			for (i = 0; i < rsp_iov->vec_num; i++){
 				rsp_msg->out.pdata_iov.sglist[i].iov_base = rsp_iov->vec[i].data;
 				rsp_msg->out.pdata_iov.sglist[i].iov_len = rsp_iov->vec[i].len;

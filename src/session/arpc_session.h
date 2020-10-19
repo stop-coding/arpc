@@ -37,7 +37,7 @@ extern "C" {
 #define SESSION_CTX(session_fd, session_usr_ctx)	\
 struct arpc_session_handle *session_fd = (struct arpc_session_handle *)session_usr_ctx;
 
-#define ARPC_SESSION_ATTR_AUTO_DISCONNECT  (15)
+#define ARPC_SESSION_ATTR_AUTO_DISCONNECT  (1<<15)
 
 enum arpc_session_type{
 	ARPC_SESSION_CLIENT = 0, //

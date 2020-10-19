@@ -109,18 +109,6 @@ struct xio_sg_iovptr {
 };
 
 /**
- * @struct xio_sg_iovptr
- * @brief scatter gather iovec pointer data structure
- */
-struct xio_base_iovptr {
-	uint32_t			nents;	    /**< number of entries */
-	uint32_t			max_nents;  /**< maximum entries   */
-						    /**< allowed	   */
-
-	struct xio_iovec		*sglist;    /**< iov list	   */
-};
-
-/**
  * @struct xio_vmsg
  * @brief message sub element type
  */

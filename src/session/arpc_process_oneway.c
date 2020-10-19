@@ -51,7 +51,7 @@ int process_oneway_data(struct xio_msg *req, struct oneway_ops *ops, int last_in
 
 	LOG_THEN_RETURN_VAL_IF_TRUE((!req), ARPC_ERROR, "req null.");
 	LOG_THEN_RETURN_VAL_IF_TRUE((!ops), ARPC_ERROR, "ops null.");
-	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(IS_SET(req->usr_flags, FLAG_MSG_ERROR_DISCARD_DATA), release_req, "dicard data.");
+	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(IS_SET(req->usr_flags, XIO_MSG_ERROR_DISCARD_DATA), release_req, "dicard data.");
 
 	memset(&rev_iov, 0, sizeof(struct arpc_vmsg));
 	rev_iov.head = req->in.header.iov_base;
@@ -88,7 +88,7 @@ int process_oneway_data(struct xio_msg *req, struct oneway_ops *ops, int last_in
 		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!ops->free_cb, free_data, "free_cb is null, can't do async.");
 		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!ops->proc_async_cb, free_data, "proc_async_cb is null, can't do async.");
 
-		async_param = (struct arpc_thread_param * )ARPC_MEM_ALLOC(sizeof(struct arpc_thread_param), NULL);
+		async_param = (struct arpc_thread_param * )arpc_mem_alloc(sizeof(struct arpc_thread_param), NULL);
 		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!async_param, free_data, "async_param is null, can't do async.");
 
 		memset(async_param, 0, sizeof(struct arpc_thread_param));
@@ -105,7 +105,7 @@ int process_oneway_data(struct xio_msg *req, struct oneway_ops *ops, int last_in
 
 		//deepcopy
 		if(rev_iov.head_len){
-			async_param->rev_iov.head = ARPC_MEM_ALLOC(rev_iov.head_len, NULL);
+			async_param->rev_iov.head = arpc_mem_alloc(rev_iov.head_len, NULL);
 			memcpy(async_param->rev_iov.head, rev_iov.head, rev_iov.head_len);
 		}
 

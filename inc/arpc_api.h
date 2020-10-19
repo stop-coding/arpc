@@ -175,10 +175,10 @@ struct arpc_rsp{
 typedef int (*mem_free_cb_t)(void* buf_ptr, void* usr_context);
 
 
-#define METHOD_ALLOC_DATA_BUF			0  					/*! @brief 申请调用者自定义内存 */
-#define METHOD_ARPC_PROC_SYNC			1  					/*! @brief ARPC接收消息同步处理 。默认情况下异步处理，需要线程池支持*/
-#define METHOD_CALLER_ASYNC				2  					/*! @brief 转调用者异步处理，消息回复需要调用者自己显性调用 */
-#define METHOD_CALLER_HIJACK_RX_DATA	3  					/*! @brief 调用者劫持接收数据,buf需要调用者释放，ARPC框架不释放。*/
+#define METHOD_ALLOC_DATA_BUF			(1<<0)  			/*! @brief 申请调用者自定义内存 */
+#define METHOD_ARPC_PROC_SYNC			(1<<1)  			/*! @brief ARPC接收消息同步处理 。默认情况下异步处理，需要线程池支持*/
+#define METHOD_CALLER_ASYNC				(1<<2)  			/*! @brief 转调用者异步处理，消息回复需要调用者自己显性调用 */
+#define METHOD_CALLER_HIJACK_RX_DATA	(1<<3)  			/*! @brief 调用者劫持接收数据,buf需要调用者释放，ARPC框架不释放。*/
 															/*		   生效条件是必须用户分配内存 */
 
 /**
@@ -187,10 +187,10 @@ typedef int (*mem_free_cb_t)(void* buf_ptr, void* usr_context);
  * @details
  *  	用于请求处理后，设置session主框架参数
  */
-#define IS_METHOD(flag, method) (flag=(flag&(1<<method)))	/*! @brief 是否设置方法 */
-#define SET_METHOD(flag, method) (flag=(flag|(1<<method)))	/*! @brief 设置方法 */
-#define CLR_METHOD(flag, method) (flag=(flag&~(1<<tag)))	/*! @brief 清除方法 */
-#define CLR_ALL_METHOD(flag) (flag=0)						/*! @brief 清除全部方法 */
+#define IS_METHOD(flag, method) (flag=(flag&(method)))	/*! @brief 是否设置方法 */
+#define SET_METHOD(flag, method) (flag=(flag|(method)))	/*! @brief 设置方法 */
+#define CLR_METHOD(flag, method) (flag=(flag&~(tag)))	/*! @brief 清除方法 */
+#define CLR_ALL_METHOD(flag) (flag=0)					/*! @brief 清除全部方法 */
 
 /**
  * @brief  请求消息操作函数
@@ -413,7 +413,7 @@ int arpc_get_session_opt(const arpc_session_handle_t *ses, struct aprc_session_o
 
 #define MAX_SESSION_REQ_DATA_LEN  1024								/*! @brief 申请session的数据长度 */
 
-#define ARPC_SESSION_ARRT_CLIENT_CONNECT_ON_USE (0)					/*! @brief 只创建不连接，使用时在建立链接 */
+#define ARPC_SESSION_ARRT_CLIENT_CONNECT_ON_USE (1<<0)				/*! @brief 只创建不连接，使用时在建立链接 */
 /**
  * @brief  客户端session实例化参数
  *

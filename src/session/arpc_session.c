@@ -38,7 +38,7 @@ struct arpc_session_handle *arpc_create_session(enum arpc_session_type type, uin
 	int i =0;
 	struct arpc_session_handle *session = NULL;
 	/* handle*/
-	session = (struct arpc_session_handle *)ARPC_MEM_ALLOC(sizeof(struct arpc_session_handle) + ex_ctx_size, NULL);
+	session = (struct arpc_session_handle *)arpc_mem_alloc(sizeof(struct arpc_session_handle) + ex_ctx_size, NULL);
 	if (!session) {
 		ARPC_LOG_ERROR( "malloc error, exit ");
 		return NULL;

@@ -28,6 +28,8 @@
 
 #define CLIENT_DESTROY_SESSION_MAX_TIME (30*1000)
 
+#define ARPC_CLIENT_LOOP_MIN_TIME_MS    (100)
+
 static int client_session_established(struct xio_session *session, struct xio_new_session_rsp *rsp, void *session_context);
 static int client_session_event(struct xio_session *session, struct xio_session_event_data *event_data, void *session_context);
 
@@ -71,8 +73,8 @@ arpc_session_handle_t arpc_client_create_session(const struct arpc_client_sessio
 	client_ctx->xio_param.uri			= client_ctx->uri;
 	client_ctx->xio_param.initial_sn	= 1;
 	if (param->req_data && param->req_data_len && param->req_data_len < MAX_SESSION_REQ_DATA_LEN) {
-		client_ctx->private_data = ARPC_MEM_ALLOC(param->req_data_len, NULL);
-		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!client_ctx->private_data, error_1, "ARPC_MEM_ALLOC fail.");
+		client_ctx->private_data = arpc_mem_alloc(param->req_data_len, NULL);
+		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!client_ctx->private_data, error_1, "arpc_mem_alloc fail.");
 		client_ctx->private_data_len = param->req_data_len;
 		memcpy(client_ctx->private_data, param->req_data, param->req_data_len);
 	}
@@ -89,7 +91,8 @@ arpc_session_handle_t arpc_client_create_session(const struct arpc_client_sessio
 								(MAX_HEADER_DATA_LEN);
 
 	idle_thread_num = tp_get_pool_idle_num(session->threadpool);
-	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(idle_thread_num < ARPC_MIN_THREAD_IDLE_NUM, destroy_xio_session, "idle_thread_num[%u] is low 2.", idle_thread_num);
+	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(idle_thread_num < ARPC_MIN_THREAD_IDLE_NUM, error_2, 
+								"idle_thread_num[%u] is low 2.", idle_thread_num);
 
 	idle_thread_num = idle_thread_num - ARPC_MIN_THREAD_IDLE_NUM;
 	idle_thread_num = (param->con_num && param->con_num < idle_thread_num)? param->con_num : idle_thread_num; // 默认是两个链接
@@ -98,14 +101,14 @@ arpc_session_handle_t arpc_client_create_session(const struct arpc_client_sessio
 	memset(&conn_param, 0, sizeof(struct arpc_connection_param));
 	conn_param.type = ARPC_CON_TYPE_CLIENT;
 	conn_param.session = session;
-	conn_param.timeout_ms = (param->timeout_ms > 100)?(param->timeout_ms):(-1);
+	conn_param.timeout_ms = (param->timeout_ms > ARPC_CLIENT_LOOP_MIN_TIME_MS)?(param->timeout_ms):(-1);
 	if (conn_param.timeout_ms > 0){
 		SET_FLAG(session->flags, ARPC_SESSION_ATTR_AUTO_DISCONNECT);
 	}
 	for (i = 0; i < idle_thread_num; i++) {
 		conn_param.id = i;
 		con = arpc_create_connection(&conn_param);
-		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!con, destroy_xio_session, "arpc_create_connection fail.");
+		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!con, error_2, "arpc_create_connection fail.");
 		ret = session_insert_con(session, con);
 		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!con, destroy_conn, "session_insert_con fail.");
 	}
@@ -122,10 +125,6 @@ destroy_conn:
 	if(con) {
 		arpc_destroy_connection(con);
 	}
-destroy_xio_session:
-	if(session->xio_s)
-		xio_session_destroy(session->xio_s);
-	session->xio_s = NULL;
 error_2:
 	SAFE_FREE_MEM(client_ctx->private_data);
 error_1:

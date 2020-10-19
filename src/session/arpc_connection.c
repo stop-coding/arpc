@@ -35,13 +35,14 @@ static const char pipe_magic[] = "msg";
 #define ARPC_EVENT_SEND_DATA 	"2"
 
 #define ARPC_CONN_TX_MAX_DEPTH	  		50
-#define MAX_TX_CNT_PER_WAKEUP			10
+#define ARPC_MAX_TX_CNT_PER_WAKEUP		10
 
+#define ARPC_CONN_EXIT_MAX_TIMES_MS	(2*1000)
 
-#define ARPC_CONN_ATTR_TELL_LIVE  (0)
-#define ARPC_CONN_ATTR_ADD_EVENT  (1)
-#define ARPC_CONN_ATTR_REBUILD    (2)
-#define ARPC_CONN_ATTR_EXIT       (3)
+#define ARPC_CONN_ATTR_TELL_LIVE  (1<<0)
+#define ARPC_CONN_ATTR_ADD_EVENT  (1<<1)
+#define ARPC_CONN_ATTR_REBUILD    (1<<2)
+#define ARPC_CONN_ATTR_EXIT       (1<<3)
 
 #define CONN_CTX(ctx_name, obj, ret)\
 struct arpc_connection_ctx *ctx_name;\
@@ -115,7 +116,7 @@ struct arpc_connection *arpc_create_connection(const struct arpc_connection_para
 	LOG_THEN_RETURN_VAL_IF_TRUE(!param, NULL, "arpc_connection_param is null.");
 	LOG_THEN_RETURN_VAL_IF_TRUE(!param->session, NULL, "session is null.");
 	/* handle*/
-	con = (struct arpc_connection *)ARPC_MEM_ALLOC(sizeof(struct arpc_connection) + sizeof(struct arpc_connection_ctx), NULL);
+	con = (struct arpc_connection *)arpc_mem_alloc(sizeof(struct arpc_connection) + sizeof(struct arpc_connection_ctx), NULL);
 	if (!con) {
 		ARPC_LOG_ERROR( "malloc error, exit ");
 		return NULL;
@@ -167,7 +168,7 @@ int arpc_destroy_connection(struct arpc_connection *con)
 	{
 		case ARPC_CON_TYPE_CLIENT:
 			if (ctx->status != ARPC_CON_STA_EXIT) {
-				ret = arpc_cond_wait_timeout(&ctx->cond, 15*1000);
+				ret = arpc_cond_wait_timeout(&ctx->cond, ARPC_CONN_EXIT_MAX_TIMES_MS);
 				LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, unlock, "con status[%d] forbid destroy.", ctx->status);
 			}
 			break;
@@ -404,7 +405,6 @@ static int arpc_client_run_loop(void * thread_ctx)
 	ctx->status = ARPC_CON_STA_RUN;
 	ret = arpc_connect_init(con);
 	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, exit_thread, "arpc_connect_init fail.");
-	ctx->status = ARPC_CON_STA_RUN;
 
 	CPU_ZERO(&cpuset);
 	CPU_SET((con->id + 1)%(arpc_cpu_max_num()), &cpuset);
@@ -414,12 +414,12 @@ static int arpc_client_run_loop(void * thread_ctx)
 	prctl(PR_SET_NAME, thread_name);
 
 	arpc_cond_notify(&ctx->cond);
-	arpc_cond_unlock(&ctx->cond);
 	ARPC_LOG_DEBUG("conn_timeout_ms[%ld] timeout.", ctx->conn_timeout_ms);
 	if(ctx->conn_timeout_ms <= 0) {
 		ctx->conn_timeout_ms = XIO_INFINITE;
 	}
 	for(;;){
+		arpc_cond_unlock(&ctx->cond);
 		ret = xio_context_run_loop(ctx->xio_con_ctx, ctx->conn_timeout_ms);
 		if (ret) {
 			ARPC_LOG_ERROR("xio loop error msg: %s.", xio_strerror(xio_errno()));
@@ -434,20 +434,17 @@ static int arpc_client_run_loop(void * thread_ctx)
 
 		if (IS_SET(ctx->flags, ARPC_CONN_ATTR_REBUILD)) {
 			CLR_FLAG(ctx->flags, ARPC_CONN_ATTR_REBUILD);
-			arpc_cond_unlock(&ctx->cond);
 			continue;
 		}
 
 		if (IS_SET(ctx->flags, ARPC_CONN_ATTR_TELL_LIVE)) {
 			CLR_FLAG(ctx->flags, ARPC_CONN_ATTR_TELL_LIVE);
-			arpc_cond_unlock(&ctx->cond);
 			continue;
 		}
 
 		ARPC_LOG_DEBUG("xio connection[%u] timeout to disconnect.", con->id);
 		if (ctx->status == ARPC_CON_STA_RUN_ACTIVE) {
 			xio_disconnect(ctx->xio_con);
-			arpc_cond_unlock(&ctx->cond);
 			continue;
 		}
 		break;
@@ -509,7 +506,7 @@ static void arpc_tx_event_callback(struct arpc_connection *usr_conn)
 	int ret;
 	QUEUE* iter;
 	struct arpc_common_msg *msg;
-	int max_tx_send = MAX_TX_CNT_PER_WAKEUP; //每次唤醒最多发送消息数，避免阻塞太长
+	int max_tx_send = ARPC_MAX_TX_CNT_PER_WAKEUP; //每次唤醒最多发送消息数，避免阻塞太长
 	CONN_CTX(con, usr_conn, ;);
 
 	while(max_tx_send){

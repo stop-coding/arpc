@@ -94,7 +94,7 @@ int process_request_data(struct arpc_connection *con, struct xio_msg *req, struc
 			ARPC_LOG_ERROR("caller don't alloc buf to rx data, can't proc async fail.");
 			goto free_user_buf;
 		}
-		async_param = (struct arpc_thread_param * )ARPC_MEM_ALLOC(sizeof(struct arpc_thread_param), NULL);
+		async_param = (struct arpc_thread_param * )arpc_mem_alloc(sizeof(struct arpc_thread_param), NULL);
 		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!async_param, free_user_buf, "async_param is null, can't do async.");
 		memset(async_param, 0, sizeof(struct arpc_thread_param));
 		async_param->ops.alloc_cb = ops->alloc_cb;
@@ -109,7 +109,7 @@ int process_request_data(struct arpc_connection *con, struct xio_msg *req, struc
 		async_param->loop = &request_msg_async_deal;
 		//deepcopy
 		if (rev_iov.head_len){
-			async_param->rev_iov.head = ARPC_MEM_ALLOC(rev_iov.head_len, NULL);
+			async_param->rev_iov.head = arpc_mem_alloc(rev_iov.head_len, NULL);
 			memcpy(async_param->rev_iov.head, rev_iov.head, rev_iov.head_len);
 		}
 

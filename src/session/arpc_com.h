@@ -52,27 +52,29 @@ extern "C" {
 #define RETRY_MAX_TIME	10	/* session断开自动重连次数*/
 #define SERVER_DOWN_WAIT_TIME		10
 
-#define IS_SET(flag, tag) (flag&(1<<tag))
-#define SET_FLAG(flag, tag) flag=(flag|(1<<tag))
-#define CLR_FLAG(flag, tag) flag=(flag&~(1<<tag))
+#define IS_SET(flag, tag) (flag&(tag))
+#define SET_FLAG(flag, tag) flag=(flag|(tag))
+#define CLR_FLAG(flag, tag) flag=(flag&~(tag))
 
 // 消息状态标志
-#define XIO_MSG_REQ 			1
-#define XIO_MSG_RSP 			2
-#define XIO_MSG_CANCEL 			3
-#define XIO_MSG_ALLOC_BUF 		4
-#define XIO_SEND_MSG_ALLOC_BUF 	5
-#define XIO_RSP_IOV_ALLOC_BUF  	6
-#define XIO_SEND_END_TO_NOTIFY  7
-#define XIO_RELEASE_ARPC_MSG  	8
+#define XIO_MSG_REQ 				(1<<0)
+#define XIO_MSG_RSP 				(1<<1)
+#define XIO_MSG_CANCEL 				(1<<2)
+#define XIO_MSG_ALLOC_BUF 			(1<<3)
+#define XIO_SEND_MSG_ALLOC_BUF 		(1<<4)
+#define XIO_RSP_IOV_ALLOC_BUF  		(1<<5)
+#define XIO_SEND_END_TO_NOTIFY  	(1<<6)
+#define XIO_RELEASE_ARPC_MSG  		(1<<7)
+#define XIO_MSG_FLAG_ALLOC_IOV_MEM 	(1<<8)
+#define XIO_MSG_ERROR_DISCARD_DATA  (1<<9)
 
-#define MSG_SET_REQ(flag) flag=(flag|(1<<XIO_MSG_REQ))
-#define MSG_SET_RSP(flag) flag=(flag|(1<<XIO_MSG_RSP))
-#define MSG_CLR_REQ(flag) flag=(flag&~(1<<XIO_MSG_REQ))
-#define MSG_CLR_RSP(flag) flag=(flag&~(1<<XIO_MSG_RSP))
+#define MSG_SET_REQ(flag) flag=(flag|XIO_MSG_REQ)
+#define MSG_SET_RSP(flag) flag=(flag|XIO_MSG_RSP)
+#define MSG_CLR_REQ(flag) flag=(flag&~XIO_MSG_REQ)
+#define MSG_CLR_RSP(flag) flag=(flag&~XIO_MSG_RSP)
 
-#define IS_SET_RSP(flag) (flag&(1<<XIO_MSG_RSP))
-#define IS_SET_REQ(flag) (flag&(1<<XIO_MSG_REQ))
+#define IS_SET_RSP(flag) (flag&(XIO_MSG_RSP)
+#define IS_SET_REQ(flag) (flag&XIO_MSG_REQ)
 
 #define TO_FREE_USER_DATA_BUF(ops, usr_ctx, iov, iov_num, i)	\
 do{\
@@ -216,15 +218,10 @@ inline static int arpc_cond_destroy(struct arpc_cond *cond)
 	return 0;
 }
 
-#define FLAG_ALLOC_BUF_TO_REV 		5
-#define FLAG_RSP_USER_DATA 			6
-#define FLAG_MSG_ERROR_DISCARD_DATA 7
-
-#define XIO_MSG_FLAG_ALLOC_IOV_MEM 	8
-
 #define ARPC_MINI_IO_DATA_MAX_LEN   (2*1024)
+
 // 最小空闲的线程数
-#define ARPC_MIN_THREAD_IDLE_NUM    4
+#define ARPC_MIN_THREAD_IDLE_NUM    (4)
 
 struct async_proc_ops{
 	void* (*alloc_cb)(uint32_t size, void* usr_context);
@@ -296,10 +293,15 @@ struct arpc_common_msg *arpc_create_common_msg(uint32_t ex_data_size);
 int arpc_destroy_common_msg(struct arpc_common_msg *msg);
 
 // base
-#define ARPC_MEM_ALLOC(size, usr_context) malloc(size)
-#define ARPC_MEM_FREE(ptr, usr_context)	free(ptr)
+inline static void *arpc_mem_alloc(size_t size, void *mem_ctx){
+	return malloc(size);
+}
 
-#define SAFE_FREE_MEM(prt) do{if(prt) {ARPC_MEM_FREE(prt, NULL);prt= NULL;}}while(0);
+inline static void arpc_mem_free(void *prt, void *mem_ctx){
+	free(prt);
+}
+
+#define SAFE_FREE_MEM(prt) do{if(prt) {arpc_mem_free(prt, NULL);prt= NULL;}}while(0);
 
 int get_uri(const struct arpc_con_info *param, char *uri, uint32_t uri_len);
 void* arpc_get_threadpool();

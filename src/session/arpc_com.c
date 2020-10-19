@@ -295,13 +295,11 @@ int create_xio_msg_usr_buf(struct xio_msg *msg, struct proc_header_func *ops, ui
 	if(ops->proc_head_cb){
 		ret = ops->proc_head_cb(&header, usr_ctx, &flag);
 		if (ret != ARPC_SUCCESS){
-			//SET_FLAG(msg->usr_flags, FLAG_MSG_ERROR_DISCARD_DATA); // data数据不做处理
 			ARPC_LOG_DEBUG("discard data, total_data_len[%lu].", msg->in.total_data_len);
 			return ARPC_ERROR;
 		}
 	}
 	if (!msg->in.total_data_len){
-		//SET_FLAG(msg->usr_flags, FLAG_MSG_ERROR_DISCARD_DATA); // data数据不做处理
 		ARPC_LOG_DEBUG("discard data, total_data_len[%lu].", msg->in.total_data_len);
 		return ARPC_ERROR;
 	}
@@ -322,7 +320,7 @@ int create_xio_msg_usr_buf(struct xio_msg *msg, struct proc_header_func *ops, ui
 	last_size = msg->in.total_data_len%iov_max_len;
 	nents = (last_size)? 1: 0;
 	nents += (msg->in.total_data_len / iov_max_len);
-	sglist = (struct xio_iovec* )ARPC_MEM_ALLOC(nents * sizeof(struct xio_iovec), NULL);
+	sglist = (struct xio_iovec* )arpc_mem_alloc(nents * sizeof(struct xio_iovec), NULL);
 	last_size = (last_size)? last_size :iov_max_len;
 
 	ARPC_LOG_DEBUG("get msg, nent:%u, iov_max_len:%lu, total_size:%lu, sglist:%p", nents, iov_max_len, msg->in.total_data_len, sglist);
@@ -348,7 +346,7 @@ error_1:
 		sglist[i].iov_base =NULL;
 	}
 	if (sglist) {
-		ARPC_MEM_FREE(sglist, NULL);
+		arpc_mem_free(sglist, NULL);
 		sglist = NULL;
 	}
 	msg->in.sgl_type = XIO_SGL_TYPE_IOV;
@@ -369,7 +367,7 @@ int destroy_xio_msg_usr_buf(struct arpc_vmsg *rev_iov, mem_free_cb_t free_cb, vo
 			free_cb(rev_iov->vec[i].data, usr_ctx);
 	}
 	if (rev_iov->vec_num && rev_iov->vec){
-		ARPC_MEM_FREE(rev_iov->vec, NULL);
+		arpc_mem_free(rev_iov->vec, NULL);
 	}
 	
 	return 0;
@@ -380,8 +378,8 @@ struct arpc_common_msg *arpc_create_common_msg(uint32_t ex_data_size)
 	struct arpc_common_msg *req_msg = NULL;
 	int ret;
 
-	req_msg = (struct arpc_common_msg*)ARPC_MEM_ALLOC(sizeof(struct arpc_common_msg) + ex_data_size,NULL);
-	LOG_THEN_RETURN_VAL_IF_TRUE(!req_msg, NULL, "ARPC_MEM_ALLOC arpc_msg fail.");
+	req_msg = (struct arpc_common_msg*)arpc_mem_alloc(sizeof(struct arpc_common_msg) + ex_data_size,NULL);
+	LOG_THEN_RETURN_VAL_IF_TRUE(!req_msg, NULL, "arpc_mem_alloc arpc_msg fail.");
 	memset(req_msg, 0, sizeof(struct arpc_common_msg) + ex_data_size);
 	ret = arpc_cond_init(&req_msg->cond); 
 	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, error, "arpc_cond_init for new msg fail.");
