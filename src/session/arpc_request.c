@@ -132,8 +132,10 @@ int arpc_request_rsp_complete(struct arpc_common_msg *req_msg)
 		LOG_ERROR_IF_VAL_TRUE(ret, "conver_msg_xio_to_arpc fail");
 		ret = xio_release_response(req_msg_ex->msg_ex->x_rsp_msg);
 		LOG_ERROR_IF_VAL_TRUE(ret, "xio_release_response fail");
-		sglist = vmsg_sglist(&req_msg_ex->msg_ex->x_rsp_msg->in);
-		SAFE_FREE_MEM(sglist);
+		if (IS_SET(req_msg_ex->msg_ex->flags, XIO_RSP_IOV_ALLOC_BUF)){
+			sglist = vmsg_sglist(&req_msg_ex->msg_ex->x_rsp_msg->in);
+			SAFE_FREE_MEM(sglist);
+		}
 		req_msg_ex->msg_ex->x_rsp_msg = NULL;
 	}
 	release_arpc2xio_msg(&req_msg_ex->msg_ex->x_req_msg.out);
