@@ -684,6 +684,7 @@ int arpc_check_connection_valid(struct arpc_connection *conn)
 		return ret;
 	}
 	if ((ctx->tx_msg_num > ARPC_CONN_TX_MAX_DEPTH) || (ctx->status != ARPC_CON_STA_RUN_ACTIVE)) {
+		ARPC_LOG_ERROR("ctx->tx_msg_num[%lu], ctx->status[%d]", ctx->tx_msg_num, ctx->status);
 		ret = ARPC_ERROR;
 	}
 	arpc_cond_unlock(&ctx->cond);

@@ -217,7 +217,7 @@ int conver_msg_xio_to_arpc(const struct xio_vmsg *xio_msg, struct arpc_vmsg *msg
 		msg->vec = 0;
 		msg->vec_num = 0;
 		msg->total_data = 0;
-		if (msg->head_len) {
+		if (!msg->head_len) {
 			ARPC_LOG_ERROR("no header and data in msg.");
 			msg->vec_type = ARPC_VEC_TYPE_NONE;
 		}
@@ -247,11 +247,11 @@ int free_receive_msg_buf(struct arpc_msg *msg)
 	uint32_t i;
 
 	LOG_THEN_RETURN_VAL_IF_TRUE(!msg, ARPC_ERROR, "msg is null.");
-	LOG_THEN_RETURN_VAL_IF_TRUE(!msg->receive.vec, ARPC_ERROR, "receive vec null.");
-	LOG_THEN_RETURN_VAL_IF_TRUE(!msg->receive.vec_num, ARPC_ERROR, "receive vec null.");
-	LOG_THEN_RETURN_VAL_IF_TRUE(msg->receive.vec_type != ARPC_VEC_TYPE_PRT, ARPC_ERROR, "vec_type invalid.");
 	ex_msg = (struct arpc_msg_ex*)msg->handle;
 	if(IS_SET(ex_msg->flags, XIO_RSP_IOV_ALLOC_BUF)){
+		LOG_THEN_RETURN_VAL_IF_TRUE(!msg->receive.vec, ARPC_ERROR, "receive vec null.");
+		LOG_THEN_RETURN_VAL_IF_TRUE(!msg->receive.vec_num, ARPC_ERROR, "receive vec null.");
+		LOG_THEN_RETURN_VAL_IF_TRUE(msg->receive.vec_type != ARPC_VEC_TYPE_PRT, ARPC_ERROR, "vec_type invalid.");
 		for (i = 0; i < msg->receive.vec_num; i++) {
 			if (msg->receive.vec[i].data)
 				ex_msg->free_cb(msg->receive.vec[i].data, ex_msg->usr_context);
