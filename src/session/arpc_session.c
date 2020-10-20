@@ -363,7 +363,7 @@ int session_async_send(struct arpc_session_handle *session, struct arpc_common_m
 
 	ret = arpc_cond_lock(&session->cond);
 	LOG_THEN_RETURN_VAL_IF_TRUE(ret, ARPC_ERROR, "arpc_mutex_lock session[%p] fail.", session);
-	if (session->type == ARPC_SESSION_CLIENT && session->status == ARPC_SES_STA_CLOSE) {
+	if (session->type == ARPC_SESSION_CLIENT && session->status != ARPC_SES_STA_ACTIVE) {
 		ret = session_client_connect(session, timeout_ms);
 		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, unlock,"session_client_connect fail");
 	}
@@ -391,7 +391,8 @@ int session_async_send(struct arpc_session_handle *session, struct arpc_common_m
 		ret = arpc_cond_wait_timeout(&session->cond, timeout_ms);
 		if (ret) {
 			ARPC_LOG_ERROR("session[%p] wait idle connection timeout[%ld ms].", session, timeout_ms);
-			break;
+			ret = session_client_connect(session, timeout_ms);
+			LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, unlock,"session_client_connect fail");
 		}
 	}
 	arpc_cond_unlock(&session->cond);

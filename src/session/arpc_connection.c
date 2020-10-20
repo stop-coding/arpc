@@ -429,7 +429,10 @@ static int arpc_client_run_loop(void * thread_ctx)
 
 		if (IS_SET(ctx->flags, ARPC_CONN_ATTR_EXIT)) {
 			CLR_FLAG(ctx->flags, ARPC_CONN_ATTR_EXIT);
-			break;
+			if (ctx->xio_con) {
+				xio_disconnect(ctx->xio_con);
+			}
+			continue;
 		}
 
 		if (IS_SET(ctx->flags, ARPC_CONN_ATTR_REBUILD)) {
@@ -444,7 +447,9 @@ static int arpc_client_run_loop(void * thread_ctx)
 
 		ARPC_LOG_DEBUG("xio connection[%u] timeout to disconnect.", con->id);
 		if (ctx->status == ARPC_CON_STA_RUN_ACTIVE) {
-			xio_disconnect(ctx->xio_con);
+			if (ctx->xio_con) {
+				xio_disconnect(ctx->xio_con);
+			}
 			continue;
 		}
 		break;
