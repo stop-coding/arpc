@@ -410,3 +410,92 @@ int arpc_destroy_common_msg(struct arpc_common_msg *msg)
 	SAFE_FREE_MEM(msg);
 	return 0;
 }
+
+const char *arpc_uri_get_resource_ptr(const char *uri)
+{
+	const char *start;
+	const char *p1, *p2 = NULL;
+
+	start = strstr(uri, "://");
+	if (!start)
+		return NULL;
+	return start + 3;
+}
+
+const char *arpc_uri_get_port_ptr(const char *uri)
+{
+	const char *start;
+
+	start = arpc_uri_get_resource_ptr(uri);
+	if (!start)
+		return NULL;
+	start = strstr(start, ":");
+	return start + 1;
+}
+
+
+int arpc_uri_get_portal(const char *uri, char *portal, int portal_len)
+{
+	const char *res = arpc_uri_get_port_ptr(uri);
+	int len = (res) ? strlen(res) : 0;
+
+	if (len < portal_len && len > 0) {
+		strncpy(portal, res, len);
+		portal[len] = 0;
+		return 0;
+	}
+
+	return -1;
+}
+
+/*---------------------------------------------------------------------------*/
+/* arpc_uri_get_resource							     */
+/*---------------------------------------------------------------------------*/
+int arpc_uri_get_resource(const char *uri, char *resource, int resource_len)
+{
+	const char *res ;
+	const char *port;
+	int  len, port_len;
+
+	res = arpc_uri_get_resource_ptr(uri);
+	if (res) {
+		int  len = strlen(res);
+		port = arpc_uri_get_port_ptr(uri);
+		if (port) {
+			port_len = strlen(port);
+			if (port_len) {
+				len -= (port_len + 1);
+			}
+		}
+		if (len < resource_len) {
+			strncpy(resource, res, len);
+			resource[len] = 0;
+			return 0;
+		}
+	}
+	return -1;
+}
+
+int arpc_uri_get_proto(const char *uri, char *proto, int proto_len)
+{
+	char *start = (char *)uri;
+	const char *end;
+	char *p;
+	int  i;
+
+	end = strstr(uri, "://");
+	if (!end)
+		return -1;
+
+	p = start;
+	for (i = 0; i < proto_len; i++) {
+		if (p == end) {
+			proto[i] = 0;
+			return 0;
+		}
+		proto[i] = *p;
+		p++;
+	}
+
+	return -1;
+}

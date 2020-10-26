@@ -38,6 +38,8 @@ struct arpc_new_session_ctx{
 	void *server_usr_ctx;
 };
 
+static char *alloc_new_work_uri(struct arpc_server_work* work, const char *req_uri, uint16_t uri_len);
+
 static int server_session_event(struct xio_session *session, struct xio_session_event_data *event_data, void *session_context);
 static int server_on_new_session(struct xio_session *session,struct xio_new_session_req *req, void *server_context);
 
@@ -277,9 +279,10 @@ static int server_on_new_session(struct xio_session *session,struct xio_new_sess
 	struct arpc_new_session_ctx *new_session_ctx = NULL;
 	struct xio_session_attr attr;
 	int ret;
-	const char	**uri_vec;
+	char	**uri_vec;
 	uint32_t i;
 	QUEUE* work_q;
+	uint32_t work_num = 0;
 	struct arpc_server_work *work_handle;
 	struct arpc_server_handle *server_fd = (struct arpc_server_handle *)server_context;
 
@@ -294,6 +297,8 @@ static int server_on_new_session(struct xio_session *session,struct xio_new_sess
 
 	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!server_fd->new_session_start, reject, "new_session_start callback null.");
 	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!server_fd->new_session_end, reject, "new_session_end callback null.");
+
+	ARPC_LOG_NOTICE("session uri:%s", req->uri);
 
 	ipv4 = &client.client_con_info;
 	LOG_THEN_GOTO_TAG_IF_VAL_TRUE((req->proto != XIO_PROTO_TCP), reject, "no tcp con, fail.");
@@ -339,20 +344,25 @@ static int server_on_new_session(struct xio_session *session,struct xio_new_sess
 	if(server_fd->work_num) {
 		uri_vec = arpc_mem_alloc(server_fd->work_num * sizeof(char *), NULL);
 		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!uri_vec, reject, "arpc_mem_alloc fail.");
-		i = 0;
+		work_num = 0;
 		QUEUE_FOREACH_VAL(&server_fd->q_work, work_q, 
 		{
-			if (i < server_fd->work_num) { 
+			if (work_num < server_fd->work_num) { 
 				work_handle = QUEUE_DATA(work_q, struct arpc_server_work, q);
-				uri_vec[i] = work_handle->uri;
-				ARPC_LOG_NOTICE("work uri:%s.", uri_vec[i]);
-				i++;
+				uri_vec[work_num] = alloc_new_work_uri(work_handle, req->uri, req->uri_len);
+				if (uri_vec[work_num]) {
+				   ARPC_LOG_NOTICE("work uri:%s.", uri_vec[work_num]);
+				   work_num++;
+				}
 				continue;
 			}
 			break;
 		});
 
-		xio_accept(session, uri_vec, server_fd->work_num, param.rsp_data, param.rsp_data_len); 
+		xio_accept(session, (const char **)uri_vec, work_num, param.rsp_data, param.rsp_data_len); 
+		for (i = 0; i < work_num; i++) {
+			arpc_mem_free(uri_vec[i], NULL);
+		}
 		arpc_mem_free(uri_vec, NULL);
 		uri_vec = NULL;
 	}else{
@@ -645,4 +655,37 @@ static void xio_server_work_stop(void * ctx)
 	return;
 }
 
+static char *alloc_new_work_uri(struct arpc_server_work* work, const char *req_uri, uint16_t uri_len)
+{
+	char proto[16] = {0};
+	char port[16] = {0};
+	char addr[32]= {0};
+	int ret;
+	char *out;
+
+	LOG_THEN_RETURN_VAL_IF_TRUE(!work, NULL, "work null fail.");
+	LOG_THEN_RETURN_VAL_IF_TRUE(!req_uri, NULL, "work null fail.");
+
+	ret = arpc_uri_get_proto(req_uri, proto, 16);
+	LOG_THEN_RETURN_VAL_IF_TRUE(ret, NULL, "arpc_uri_get_proto fail.");
+
+	ret = arpc_uri_get_resource(req_uri, addr, 32);
+	LOG_THEN_RETURN_VAL_IF_TRUE(ret, NULL, "arpc_uri_get_resource fail.");
+
+	ret = arpc_uri_get_portal(work->uri, port, 16);
+	LOG_THEN_RETURN_VAL_IF_TRUE(ret, NULL, "arpc_uri_get_portal fail.");
+
+	out = arpc_mem_alloc(256, NULL);
+	LOG_THEN_RETURN_VAL_IF_TRUE(!out, NULL, "arpc_mem_alloc fail.");
+
+	memset((void*)out, 0, 256);
+
+	ret = sprintf(out, "%s://%s:%s", proto, addr, port);//这里需要获取类型
+	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret < 0, free_buf, "sprintf fail.");
+
+	return out;
+free_buf:
+	SAFE_FREE_MEM(out);
+	return NULL;
+}
 #endif

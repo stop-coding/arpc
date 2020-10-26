@@ -33,13 +33,13 @@ int msg_head_process(struct xio_session *session, struct xio_msg *msg, void *con
 	ARPC_LOG_DEBUG("header message type:%d", msg->type);
 	switch(msg->type) {
 		case XIO_MSG_TYPE_REQ:
-			ret = process_request_header(conn, msg, &conn_ops->req_ops, IOV_DEFAULT_MAX_LEN, arpc_get_ops_ctx(conn));
+			ret = process_request_header(conn, msg, &conn_ops->req_ops, arpc_get_max_iov_len(conn), arpc_get_ops_ctx(conn));
 			break;
 		case XIO_MSG_TYPE_RSP:
 			ret = process_rsp_header(msg, conn);
 			break;
 		case XIO_MSG_TYPE_ONE_WAY:
-			ret = process_oneway_header(msg, &conn_ops->oneway_ops, IOV_DEFAULT_MAX_LEN, arpc_get_ops_ctx(conn));
+			ret = process_oneway_header(msg, &conn_ops->oneway_ops, arpc_get_max_iov_len(conn), arpc_get_ops_ctx(conn));
 			break;  
 		default:
 			break;

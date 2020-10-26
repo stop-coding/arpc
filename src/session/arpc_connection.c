@@ -428,11 +428,13 @@ static int arpc_client_run_loop(void * thread_ctx)
 		LOG_THEN_RETURN_VAL_IF_TRUE(ret, ARPC_ERROR, "arpc_cond_lock con cond fail.");
 
 		if (IS_SET(ctx->flags, ARPC_CONN_ATTR_EXIT)) {
-			CLR_FLAG(ctx->flags, ARPC_CONN_ATTR_EXIT);
 			if (ctx->xio_con) {
 				xio_disconnect(ctx->xio_con);
+				continue;
+			}else{
+				CLR_FLAG(ctx->flags, ARPC_CONN_ATTR_EXIT);
+				break;
 			}
-			continue;
 		}
 
 		if (IS_SET(ctx->flags, ARPC_CONN_ATTR_REBUILD)) {
@@ -735,4 +737,9 @@ void *arpc_get_ops_ctx(struct arpc_connection *con)
 {
 	CONN_CTX(ctx, con, NULL);
 	return ctx->session?(ctx->session->usr_context):NULL;
+}
+uint32_t arpc_get_max_iov_len(struct arpc_connection *con)
+{
+	CONN_CTX(ctx, con, IOV_DEFAULT_MAX_LEN);
+	return ctx->msg_iov_max_len >8 ? ctx->msg_iov_max_len: IOV_DEFAULT_MAX_LEN;
 }

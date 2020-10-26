@@ -304,6 +304,11 @@ inline static void arpc_mem_free(void *prt, void *mem_ctx){
 #define SAFE_FREE_MEM(prt) do{if(prt) {arpc_mem_free(prt, NULL);prt= NULL;}}while(0);
 
 int get_uri(const struct arpc_con_info *param, char *uri, uint32_t uri_len);
+const char *arpc_uri_get_resource_ptr(const char *uri);
+int arpc_uri_get_portal(const char *uri, char *portal, int portal_len);
+int arpc_uri_get_resource(const char *uri, char *resource, int resource_len);
+int arpc_uri_get_proto(const char *uri, char *proto, int proto_len);
+
 void* arpc_get_threadpool();
 uint32_t arpc_thread_max_num();
 uint32_t arpc_cpu_max_num();
