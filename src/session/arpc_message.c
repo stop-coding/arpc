@@ -57,12 +57,13 @@ struct arpc_msg *arpc_new_msg(const struct arpc_msg_param *p)
 		ex_msg->alloc_cb = p->alloc_cb;
 		ex_msg->free_cb = p->free_cb;
 		ex_msg->usr_context = p->usr_context;
+		ex_msg->iov_max_len = p->msg_iov_max_len? p->msg_iov_max_len:0;
 	}else{
 		ex_msg->alloc_cb = &arpc_msg_alloc;
 		ex_msg->free_cb = &arpc_msg_free;
 		ex_msg->usr_context =NULL;
+		ex_msg->iov_max_len = 0;
 	}
-	ex_msg->iov_max_len = 0;
 	ex_msg->msg = ret_msg;
 	return ret_msg;
 }
