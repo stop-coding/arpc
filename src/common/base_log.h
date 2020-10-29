@@ -31,8 +31,14 @@ extern "C" {
 #define BASE_SUCCESS		 0
 
 //#define BASE_DEBUG_ON
-#define BASE_LOG_ERROR(format, arg...) syslog(LOG_ERR, 	"[ ARPC] [ ERROR] [%lu] file:%s func: %s|%d---"format"\n", pthread_self(),__FILE__, __FUNCTION__, __LINE__,##arg)
-#define BASE_LOG_NOTICE(format, arg...) syslog(LOG_NOTICE, "[ ARPC] [NOTICE] func: %s|%d---"format"\n",__FUNCTION__, __LINE__, ##arg)
+#define BASE_LOG_ERROR(format, arg...) \
+		syslog(LOG_ERR, 	"[ ARPC] [ ERROR] [%lu] file:%s func: %s|%d---"format"\n", pthread_self(),__FILE__, __FUNCTION__, __LINE__,##arg);\
+		fprintf(stderr, 	"[ ARPC] [ ERROR] file:%s func: %s|%d---"format"\n", __FILE__, __FUNCTION__, __LINE__,##arg);
+
+#define BASE_LOG_NOTICE(format, arg...) \
+		syslog(LOG_NOTICE, "[ ARPC] [NOTICE] func: %s|%d---"format"\n",__FUNCTION__, __LINE__, ##arg);\
+		fprintf(stderr, "[ ARPC] [NOTICE] func: %s|%d---"format"\n",__FUNCTION__, __LINE__, ##arg);
+
 //#define BASE_LOG_NOTICE(format, arg...)
 //#define BASE_LOG_ERROR(format, arg...) fprintf(stderr, 	"[ ARPC] [ ERROR] file:%s func: %s|%d---"format"\n", __FILE__, __FUNCTION__, __LINE__,##arg)
 //#define BASE_LOG_NOTICE(format, arg...) fprintf(stderr, "[ ARPC] [NOTICE] func: %s|%d---"format"\n",__FUNCTION__, __LINE__, ##arg)
