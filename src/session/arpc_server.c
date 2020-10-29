@@ -281,7 +281,7 @@ static int server_on_new_session(struct xio_session *session,struct xio_new_sess
 	struct arpc_new_session_rsp param;
 	struct arpc_session_handle *new_session = NULL;
 	struct arpc_new_session_ctx *new_session_ctx = NULL;
-	struct xio_session_attr attr;
+	struct xio_session_attr attr = {0};
 	int ret;
 	char	**uri_vec;
 	void *req_addr;
@@ -292,6 +292,7 @@ static int server_on_new_session(struct xio_session *session,struct xio_new_sess
 	QUEUE* work_q;
 	uint32_t work_num = 0;
 	struct arpc_server_work *work_handle;
+	char req_uri[256] = {0};
 	struct arpc_server_handle *server_fd = (struct arpc_server_handle *)server_context;
 
 	LOG_THEN_RETURN_VAL_IF_TRUE((!session || !req || !server_fd), -1, "invalid input.");
@@ -306,7 +307,10 @@ static int server_on_new_session(struct xio_session *session,struct xio_new_sess
 	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!server_fd->new_session_start, reject, "new_session_start callback null.");
 	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!server_fd->new_session_end, reject, "new_session_end callback null.");
 
-	ARPC_LOG_NOTICE("session uri:%s", req->uri);
+	if(req->uri && req->uri_len){
+		memcpy(req_uri, req->uri, req->uri_len);
+	}
+	ARPC_LOG_NOTICE("session uri:%s", req_uri);
 
 	ipv4 = &client.client_con_info;
 	LOG_THEN_GOTO_TAG_IF_VAL_TRUE((req->proto != XIO_PROTO_TCP), reject, "no tcp con, fail.");
@@ -363,7 +367,7 @@ static int server_on_new_session(struct xio_session *session,struct xio_new_sess
 		{
 			if (work_num < server_fd->work_num) { 
 				work_handle = QUEUE_DATA(work_q, struct arpc_server_work, q);
-				uri_vec[work_num] = alloc_new_work_uri(work_handle, req->uri, req->uri_len);
+				uri_vec[work_num] = alloc_new_work_uri(work_handle, req_uri, strlen(req_uri));
 				if (uri_vec[work_num]) {
 				   ARPC_LOG_NOTICE("work uri:%s.", uri_vec[work_num]);
 				   work_num++;
