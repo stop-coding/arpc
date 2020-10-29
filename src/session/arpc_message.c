@@ -62,7 +62,7 @@ struct arpc_msg *arpc_new_msg(const struct arpc_msg_param *p)
 		ex_msg->free_cb = &arpc_msg_free;
 		ex_msg->usr_context =NULL;
 	}
-	ex_msg->iov_max_len = IOV_DEFAULT_MAX_LEN;
+	ex_msg->iov_max_len = 0;
 	ex_msg->msg = ret_msg;
 	return ret_msg;
 }

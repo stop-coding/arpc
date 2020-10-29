@@ -26,6 +26,7 @@ int process_rsp_header(struct xio_msg *rsp, struct arpc_connection *con)
 {
 	struct proc_header_func head_ops;
 	int ret;
+	uint64_t iov_max_len = 0;
 	struct arpc_common_msg *req_msg = (struct arpc_common_msg *)rsp->user_context;
 	REQUEST_USR_EX_CTX(ex_msg, req_msg);
 
@@ -36,7 +37,12 @@ int process_rsp_header(struct xio_msg *rsp, struct arpc_connection *con)
 	head_ops.alloc_cb = ex_msg->alloc_cb;
 	head_ops.free_cb = ex_msg->free_cb;
 	head_ops.proc_head_cb = NULL;
-	ret = create_xio_msg_usr_buf(ex_msg->x_rsp_msg, &head_ops, ex_msg->iov_max_len, ex_msg);//申请资源
+	if (ex_msg->iov_max_len) {
+		ret = create_xio_msg_usr_buf(ex_msg->x_rsp_msg, &head_ops, iov_max_len, ex_msg);//申请资源
+	}else{
+		ret = create_xio_msg_usr_buf(ex_msg->x_rsp_msg, &head_ops, arpc_get_max_iov_len(con), ex_msg);//申请资源
+	}
+	
 	if (!ret){
 		SET_FLAG(ex_msg->flags, XIO_RSP_IOV_ALLOC_BUF);
 	}

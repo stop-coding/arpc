@@ -285,6 +285,7 @@ struct arpc_msg_param{
 	int   (*free_cb)(void* buf_ptr, void* usr_context);		/*! @brief 内存释放 可选*/
 	void 		*usr_context;								/*! @brief 用户上下文 */
 	uint32_t 	flag;										/*! @brief 预留参数 */
+	uint32_t  msg_iov_max_len;								/*! @brief IOV最大长度 ，[1024, 8*1024k] 默认1k，pfile需要设置为4k*/
 };
 
 /**
