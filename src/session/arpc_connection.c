@@ -299,6 +299,7 @@ int arpc_client_reconnect(struct arpc_connection *con)
 	ret = arpc_cond_lock(&ctx->cond);
 	LOG_THEN_RETURN_VAL_IF_TRUE(ret, ARPC_ERROR, "arpc_cond_lock fail, maybe free already.");
 	ctx->status = ARPC_CON_STA_RUN;
+	ARPC_LOG_ERROR("reconnection");
 	(void)memset(&xio_con_param, 0, sizeof(struct xio_connection_params));
 	xio_con_param.session			= ctx->session->xio_s;
 	xio_con_param.ctx				= ctx->xio_con_ctx;
@@ -683,18 +684,13 @@ int arpc_connection_async_send(struct arpc_connection *conn, struct arpc_common_
 
 int arpc_check_connection_valid(struct arpc_connection *conn)
 {
-	int ret;
+	int ret = 0;
 	CONN_CTX(ctx, conn, ARPC_ERROR);
 
-	ret = arpc_cond_trylock(&ctx->cond);
-	if (ret) {
-		return ret;
-	}
 	if ((ctx->tx_msg_num > ARPC_CONN_TX_MAX_DEPTH) || (ctx->status != ARPC_CON_STA_RUN_ACTIVE)) {
-		ARPC_LOG_ERROR("ctx->tx_msg_num[%lu], ctx->status[%d]", ctx->tx_msg_num, ctx->status);
+		ARPC_LOG_ERROR("conn[%u], tx num[%lu], status[%d]", conn->id, ctx->tx_msg_num, ctx->status);
 		ret = ARPC_ERROR;
 	}
-	arpc_cond_unlock(&ctx->cond);
 	return ret;
 }
 
@@ -706,7 +702,7 @@ int arpc_connection_send_comp_notify(struct arpc_connection *conn, struct arpc_c
 
 	ret = arpc_cond_lock(&ctx->cond);
 	LOG_THEN_RETURN_VAL_IF_TRUE(ret, ARPC_ERROR, "arpc_cond_lock conn[%u][%p] fail.", conn->id, conn);
-	LOG_THEN_GOTO_TAG_IF_VAL_TRUE((ctx->status != ARPC_CON_STA_RUN_ACTIVE), unlock, "connoection not active");
+	LOG_THEN_GOTO_TAG_IF_VAL_TRUE((ctx->status != ARPC_CON_STA_RUN_ACTIVE), unlock, "connection not active");
 
 	ret = arpc_cond_lock(&msg->cond);
 	if(!ret){

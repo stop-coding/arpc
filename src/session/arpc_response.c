@@ -72,6 +72,7 @@ int arpc_init_response(struct arpc_common_msg *rsp_fd)
 	uint32_t			i;
 	struct arpc_rsp_handle *rsp_fd_ex;
 	struct  arpc_vmsg  *rsp_iov;
+	int ret;
 
 	LOG_THEN_RETURN_VAL_IF_TRUE(!rsp_fd, -1, "release_rsp_cb is null ,can't send user rsp data.");
 	LOG_THEN_RETURN_VAL_IF_TRUE(!rsp_fd->conn, -1, "conn is null ,can't send user rsp data.");
@@ -82,30 +83,11 @@ int arpc_init_response(struct arpc_common_msg *rsp_fd)
 	rsp_fd->tx_msg = rsp_msg;
 	
 	LOG_THEN_RETURN_VAL_IF_TRUE(!rsp_fd_ex->x_rsp_msg, -1, "x_rsp_msg is null ,can't send user rsp data.");
-
 	if(rsp_iov && rsp_iov->head && rsp_iov->head_len){
 		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!rsp_fd_ex->release_rsp_cb, rsp_default, "release_rsp_cb is null ,can't send user rsp data.");
-
-		rsp_msg->out.header.iov_base = rsp_iov->head;
-		rsp_msg->out.header.iov_len  = rsp_iov->head_len;
-		//data
-		if (rsp_iov->vec && rsp_iov->vec_num) {
-			rsp_msg->out.total_data_len  = rsp_iov->total_data;
-			rsp_msg->out.sgl_type = XIO_SGL_TYPE_IOV_PTR;
-			rsp_msg->out.pdata_iov.sglist = arpc_mem_alloc(rsp_iov->vec_num * sizeof(struct xio_iovec_ex), NULL);
-			for (i = 0; i < rsp_iov->vec_num; i++){
-				rsp_msg->out.pdata_iov.sglist[i].iov_base = rsp_iov->vec[i].data;
-				rsp_msg->out.pdata_iov.sglist[i].iov_len = rsp_iov->vec[i].len;
-				rsp_msg->out.pdata_iov.sglist[i].mr = NULL;
-				rsp_msg->out.pdata_iov.sglist[i].user_context = NULL;
-			}
-			rsp_msg->out.pdata_iov.max_nents = rsp_iov->vec_num;
-			vmsg_sglist_set_nents(&rsp_msg->out, rsp_iov->vec_num);
-			SET_FLAG(rsp_msg->usr_flags, XIO_MSG_FLAG_ALLOC_IOV_MEM);
-		}else{
-			rsp_msg->out.pdata_iov.max_nents = 0;
-			vmsg_sglist_set_nents(&rsp_msg->out, 0);
-		}
+		ret = convert_msg_arpc2xio(rsp_iov, &rsp_msg->out, &rsp_fd_ex->attr);
+		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, rsp_default, "convert_msg_arpc2xio fail.");
+		SET_FLAG(rsp_msg->usr_flags, XIO_MSG_FLAG_ALLOC_IOV_MEM);
 		goto rsp;
 	}else{
 		ARPC_LOG_ERROR("response is empty, no head and data.");
@@ -139,7 +121,7 @@ int arpc_send_response_complete(struct arpc_common_msg *rsp_fd)
 	}
 	rsp_msg = &rsp_fd_ex->x_req_msg;
 	if(IS_SET(rsp_msg->usr_flags, XIO_MSG_FLAG_ALLOC_IOV_MEM) && rsp_msg->out.pdata_iov.sglist){
-		SAFE_FREE_MEM(rsp_msg->out.pdata_iov.sglist);
+		free_msg_arpc2xio(&rsp_msg->out);
 	}
 	ret = arpc_cond_unlock(&rsp_fd->cond);
 	arpc_destroy_common_msg(rsp_fd);

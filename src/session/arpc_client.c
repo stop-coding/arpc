@@ -25,6 +25,7 @@
 #include "arpc_request.h"
 #include "arpc_response.h"
 #include "arpc_xio_callback.h"
+#include "arpc_proto.h"
 
 #define CLIENT_DESTROY_SESSION_MAX_TIME (30*1000)
 
@@ -54,6 +55,7 @@ arpc_session_handle_t arpc_client_create_session(const struct arpc_client_sessio
 	struct arpc_connection *con;
 	struct xio_connection_params xio_con_param;
 	struct arpc_connection_param conn_param;
+	struct arpc_proto_new_session req_new;
 	//LOG_THEN_RETURN_VAL_IF_TRUE(!param->ops, NULL, "ops is null.");
 
 	session = arpc_create_session(ARPC_SESSION_CLIENT, sizeof(struct arpc_client_ctx));
@@ -72,12 +74,6 @@ arpc_session_handle_t arpc_client_create_session(const struct arpc_client_sessio
 	client_ctx->xio_param.user_context	= session;
 	client_ctx->xio_param.uri			= client_ctx->uri;
 	client_ctx->xio_param.initial_sn	= 1;
-	if (param->req_data && param->req_data_len && param->req_data_len < MAX_SESSION_REQ_DATA_LEN) {
-		client_ctx->private_data = arpc_mem_alloc(param->req_data_len, NULL);
-		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!client_ctx->private_data, error_1, "arpc_mem_alloc fail.");
-		client_ctx->private_data_len = param->req_data_len;
-		memcpy(client_ctx->private_data, param->req_data, param->req_data_len);
-	}
 
 	session->msg_iov_max_len  = (param->opt.msg_iov_max_len && param->opt.msg_iov_max_len <= (4*1024))?
 								param->opt.msg_iov_max_len:
@@ -89,6 +85,27 @@ arpc_session_handle_t arpc_client_create_session(const struct arpc_client_sessio
 	session->msg_head_max_len = (param->opt.msg_head_max_len && param->opt.msg_head_max_len <= (1024))?
 								param->opt.msg_head_max_len:
 								(MAX_HEADER_DATA_LEN);
+
+	req_new.max_head_len = session->msg_head_max_len;
+	req_new.max_data_len = session->msg_data_max_len;
+	req_new.max_iov_len  = session->msg_iov_max_len;
+
+	if (param->req_data && param->req_data_len && param->req_data_len < MAX_SESSION_REQ_DATA_LEN) {
+		client_ctx->xio_param.private_data = arpc_mem_alloc(sizeof(struct arpc_tlv) + sizeof(struct arpc_proto_new_session), NULL);
+		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!client_ctx->xio_param.private_data, error_1, "arpc_mem_alloc fail.");
+		arpc_write_tlv(ARPC_PROTO_NEW_SESSION, sizeof(struct arpc_proto_new_session), client_ctx->xio_param.private_data);
+		pack_new_session(&req_new, (uint8_t*)client_ctx->xio_param.private_data 
+													+ sizeof(struct arpc_tlv), 
+													sizeof(struct arpc_proto_new_session));
+		client_ctx->xio_param.private_data_len = sizeof(struct arpc_tlv) + sizeof(struct arpc_proto_new_session);
+	}else{
+		client_ctx->xio_param.private_data = arpc_mem_alloc(sizeof(struct arpc_tlv) + sizeof(struct arpc_proto_new_session), NULL);
+		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!client_ctx->xio_param.private_data, error_1, "arpc_mem_alloc fail.");
+		arpc_write_tlv(ARPC_PROTO_NEW_SESSION, sizeof(struct arpc_proto_new_session), client_ctx->xio_param.private_data);
+		client_ctx->xio_param.private_data_len = pack_new_session(&req_new, (uint8_t*)client_ctx->xio_param.private_data 
+														+ sizeof(struct arpc_tlv), 
+														sizeof(struct arpc_proto_new_session));
+	}
 
 	idle_thread_num = tp_get_pool_idle_num(session->threadpool);
 	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(idle_thread_num < ARPC_MIN_THREAD_IDLE_NUM, error_2, 

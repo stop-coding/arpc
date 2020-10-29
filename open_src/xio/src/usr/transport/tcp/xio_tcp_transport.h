@@ -166,7 +166,7 @@ PACKED_MEMORY(struct xio_tcp_rsp_hdr {
 	uint16_t		pad;
 
 	uint32_t		ltid;		/* local task id	*/
-	uint32_t                rtid;           /* remote task id       */
+	uint32_t        rtid;           /* remote task id       */
 
 	uint8_t			out_tcp_op;	/* opcode  for peers	*/
 	uint8_t			pad1;

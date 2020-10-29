@@ -330,7 +330,7 @@ work_handle_t tp_post_one_work(tp_handle fd, struct tp_thread_work *w, uint8_t a
   if (pool->idle_num > 0){
     	pthread_cond_signal(&pool->cond);
   }else{
-	  TP_LOG_NOTICE("not free thread to done, idle:%u, total:%u.", pool->idle_num, pool->thread_num);
+	  TP_LOG_NOTICE("no idle thread to process task, idle:%u, total:%u.", pool->idle_num, pool->thread_num);
   }
   pthread_mutex_unlock(&pool->mutex);
   return work;

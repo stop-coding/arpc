@@ -23,8 +23,8 @@
 #include "arpc_request.h"
 #include "arpc_message.h"
 
-#define SEND_ONEWAY_END_MAX_TIME (10*1000)
-#define DO_REQUEST_RSP_MAX_TIME  (30*1000)
+#define SEND_ONEWAY_END_MAX_TIME (2*1000)
+#define DO_REQUEST_RSP_MAX_TIME  (5*1000)
 
 /**
  * 发送一个请求消息
@@ -56,8 +56,7 @@ int arpc_do_request(const arpc_session_handle_t fd, struct arpc_msg *msg, int32_
 	req = &ex_msg->x_req_msg;
 	req_msg->tx_msg = req;
 
-	// get msg
-	ret = conver_msg_arpc_to_xio(&msg->send, &req->out);
+	ret = convert_msg_arpc2xio(&msg->send, &req->out, &ex_msg->attr);
 	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, free_common_msg, "convert xio msg fail.");
 	req->user_context = req_msg;
 	ex_msg = (struct arpc_msg_ex *)msg->handle;
@@ -83,31 +82,35 @@ int arpc_do_request(const arpc_session_handle_t fd, struct arpc_msg *msg, int32_
 	MSG_SET_REQ(ex_msg->flags);
 	if (!msg->proc_rsp_cb){
 		if (timeout_ms > 0)
-			ret = arpc_cond_wait_timeout(&req_msg->cond, timeout_ms + DO_REQUEST_RSP_MAX_TIME);
+			ret = arpc_cond_wait_timeout(&req_msg->cond, timeout_ms + 500);//至少500ms起步
 		else
 			ret = arpc_cond_wait_timeout(&req_msg->cond, DO_REQUEST_RSP_MAX_TIME); // 默认等待
 		if (!ret){
 			ex_msg->x_rsp_msg = NULL;
 			MSG_CLR_REQ(ex_msg->flags);
 			arpc_cond_unlock(&req_msg->cond);
+			free_msg_arpc2xio(&req->out);
 			arpc_destroy_common_msg(req_msg);
 		}else{
-			ARPC_LOG_ERROR("wait msg rx respone of request fail.");
+			ARPC_LOG_ERROR("wait msg rx respone of request fail.");// todo 内存回收
 			ex_msg->x_rsp_msg = NULL;
 			MSG_CLR_REQ(ex_msg->flags);
 			arpc_cond_unlock(&req_msg->cond);
-			//arpc_destroy_common_msg(req_msg);	//un lock
-			return -1;
+			return (-ETIMEDOUT);
 		}
 	}else{
 		arpc_cond_unlock(&req_msg->cond);
+	}
+	if (IS_SET(ex_msg->flags, XIO_MSG_ERROR_DISCARD_DATA)){
+		return (-ENODATA);
 	}
 	return 0;
 unlock:
 	arpc_cond_unlock(&req_msg->cond);
 free_common_msg:
+	free_msg_arpc2xio(&req->out);
 	arpc_destroy_common_msg(req_msg);	//un lock
-	return ARPC_ERROR;	
+	return (-ENETUNREACH);	
 }
 
 /**
@@ -125,29 +128,23 @@ int arpc_request_rsp_complete(struct arpc_common_msg *req_msg)
 	ret = arpc_cond_lock(&req_msg->cond);
 	LOG_THEN_RETURN_VAL_IF_TRUE(ret, ARPC_ERROR, "rsp copmlete cond lock fail, maybe release.");
 	req_msg_ex = (struct arpc_request_handle *)req_msg->ex_data;
-	
-	if(req_msg_ex->msg_ex->x_rsp_msg){
-		SET_FLAG(req_msg_ex->msg_ex->flags, XIO_MSG_RSP);
-		ret = conver_msg_xio_to_arpc(&req_msg_ex->msg_ex->x_rsp_msg->in, &req_msg_ex->msg->receive);
-		LOG_ERROR_IF_VAL_TRUE(ret, "conver_msg_xio_to_arpc fail");
-		ret = xio_release_response(req_msg_ex->msg_ex->x_rsp_msg);
-		LOG_ERROR_IF_VAL_TRUE(ret, "xio_release_response fail");
-		if (IS_SET(req_msg_ex->msg_ex->flags, XIO_RSP_IOV_ALLOC_BUF)){
-			sglist = vmsg_sglist(&req_msg_ex->msg_ex->x_rsp_msg->in);
-			SAFE_FREE_MEM(sglist);
-		}
-		req_msg_ex->msg_ex->x_rsp_msg = NULL;
-	}
-	release_arpc2xio_msg(&req_msg_ex->msg_ex->x_req_msg.out);
+
+	SET_FLAG(req_msg_ex->msg_ex->flags, XIO_MSG_RSP);
+	MSG_CLR_REQ(req_msg_ex->msg_ex->flags);
 	if (req_msg_ex->msg && req_msg_ex->msg->proc_rsp_cb){
-		req_msg_ex->msg->proc_rsp_cb(&req_msg_ex->msg->receive, req_msg_ex->msg->receive_ctx);
+		if (IS_SET(req_msg_ex->msg_ex->flags, XIO_MSG_ERROR_DISCARD_DATA)){
+			req_msg_ex->msg->proc_rsp_cb(NULL, req_msg_ex->msg->receive_ctx);
+		}else{
+			req_msg_ex->msg->proc_rsp_cb(&req_msg_ex->msg->receive, req_msg_ex->msg->receive_ctx);
+		}
 		arpc_cond_unlock(&req_msg->cond);
+		free_msg_arpc2xio(&req_msg_ex->msg_ex->x_req_msg.out);
 		arpc_destroy_common_msg(req_msg);	//un lock
 	}else{
 		arpc_cond_notify(&req_msg->cond);
 		arpc_cond_unlock(&req_msg->cond);
 	}
-	ARPC_LOG_DEBUG("send end complete.");
+	ARPC_LOG_DEBUG("request get rsp complete.");
 	return 0;
 }
 
@@ -180,7 +177,7 @@ int arpc_send_oneway_msg(const arpc_session_handle_t fd, struct arpc_vmsg *send,
 	req_msg->tx_msg = req;
 	req_msg->type = ARPC_MSG_TYPE_OW;
 	// get msg
-	ret = conver_msg_arpc_to_xio(send, &req->out);
+	ret = convert_msg_arpc2xio(send, &req->out, &ow_msg->attr);
 	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, free_common_msg, "convert xio msg fail.");
 	req->user_context = req_msg;
 	if (!ow_msg->clean_send_cb){
@@ -204,6 +201,7 @@ int arpc_send_oneway_msg(const arpc_session_handle_t fd, struct arpc_vmsg *send,
 		ret = arpc_cond_wait_timeout(&req_msg->cond, SEND_ONEWAY_END_MAX_TIME); // 默认等待
 		LOG_ERROR_IF_VAL_TRUE(ret, "wait oneway msg send complete timeout fail.");
 		arpc_cond_unlock(&req_msg->cond);
+		free_msg_arpc2xio(&req->out);
 		arpc_destroy_common_msg(req_msg);	//un lock
 	}else{
 		arpc_cond_unlock(&req_msg->cond);
@@ -212,6 +210,7 @@ int arpc_send_oneway_msg(const arpc_session_handle_t fd, struct arpc_vmsg *send,
 unlock:
 	arpc_cond_unlock(&req_msg->cond);
 free_common_msg:
+	free_msg_arpc2xio(&req->out);
 	arpc_destroy_common_msg(req_msg);	//un lock
 	return ARPC_ERROR;
 }
@@ -230,10 +229,11 @@ int arpc_oneway_send_complete(struct arpc_common_msg *ow_msg)
 	ret = arpc_cond_lock(&ow_msg->cond);
 	LOG_THEN_RETURN_VAL_IF_TRUE(ret, ARPC_ERROR, "send copmlete cond lock fail, maybe release.");
 	ow_msg_ex = (struct arpc_oneway_handle *)ow_msg->ex_data;
-	release_arpc2xio_msg(&ow_msg->tx_msg->out);
+
 	if (ow_msg_ex->clean_send_cb){
 		ow_msg_ex->clean_send_cb(ow_msg_ex->send, ow_msg_ex->send_ctx);
 		arpc_cond_unlock(&ow_msg->cond);
+		free_msg_arpc2xio(&ow_msg_ex->x_req_msg.out);
 		arpc_destroy_common_msg(ow_msg);	//un lock
 	}else{
 		arpc_cond_notify(&ow_msg->cond);

@@ -29,6 +29,8 @@
 #define WAIT_THREAD_RUNING_TIMEOUT (1000)
 #define ARPC_SESSION_RECONNECT_FAIL_MAX_TIME (2)
 #define ARPC_SESSION_RECONNECT_WAIT_TIME_S   (10)
+#define ARPC_SESSION_BUSY_WAIT_TIME_MS		(50)
+#define ARPC_SESSION_BUSY_RETRY_CNT			(3)
 
 static int session_client_connect(struct arpc_session_handle *session, int64_t timeout_ms);
 
@@ -357,6 +359,7 @@ int session_async_send(struct arpc_session_handle *session, struct arpc_common_m
 {
 	int ret;
 	QUEUE* iter;
+	int try_time = 0;
 	struct arpc_connection *con = NULL;
 
 	LOG_THEN_RETURN_VAL_IF_TRUE(!session, ARPC_ERROR, "session is null.");
@@ -375,24 +378,27 @@ int session_async_send(struct arpc_session_handle *session, struct arpc_common_m
 		QUEUE_FOREACH_VAL(&session->q_con, iter,
 		{
 			con = QUEUE_DATA(iter, struct arpc_connection, q);
-			ret = arpc_check_connection_valid(con);
-			if(ret == ARPC_SUCCESS){
-				//arpc_lock_connection(con);
-				QUEUE_REMOVE(&con->q);
-				QUEUE_INSERT_TAIL(&session->q_con, &con->q);
-				//arpc_unlock_connection(con);
-				break;
+			ret = arpc_lock_connection(con);
+			if(!ret){
+				ret = arpc_check_connection_valid(con);
+				if(!ret){
+					QUEUE_REMOVE(&con->q);
+					QUEUE_INSERT_TAIL(&session->q_con, &con->q);
+					arpc_unlock_connection(con);
+					break;
+				}
+				arpc_unlock_connection(con);
 			}
 			con = NULL;
 		});
 		
 		if(con){break;}
-		ARPC_LOG_NOTICE("warning: session[%p][con_num:%u] no idle connection, wait[%ld ms]...", session, session->conn_num, timeout_ms);
-		ret = arpc_cond_wait_timeout(&session->cond, timeout_ms);
-		if (ret) {
-			ARPC_LOG_ERROR("session[%p] wait idle connection timeout[%ld ms].", session, timeout_ms);
-			ret = session_client_connect(session, timeout_ms);
-			LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, unlock,"session_client_connect fail");
+		try_time++;
+		ARPC_LOG_NOTICE("warning: session[%p][con_num:%u] no idle connection, wait[%u ms]...", session, session->conn_num, ARPC_SESSION_BUSY_WAIT_TIME_MS);
+		ret = arpc_cond_wait_timeout(&session->cond, ARPC_SESSION_BUSY_WAIT_TIME_MS);
+		if (ret && try_time > ARPC_SESSION_BUSY_RETRY_CNT) {
+			ARPC_LOG_ERROR("session[%p] wait idle connection timeout[%lu ms].", session, (uint64_t)(try_time *ARPC_SESSION_BUSY_WAIT_TIME_MS));
+			goto unlock;
 		}
 	}
 	arpc_cond_unlock(&session->cond);

@@ -23,6 +23,7 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <mcheck.h>
+#include <pthread.h>
 
 #include "arpc_api.h"
 #include "sha256.h"
@@ -34,11 +35,13 @@
 static struct arpc_cond 		g_cond;
 static BYTE g_buf_str[SHA256_BLOCK_SIZE*2 +1] = {0};
 
+#define CLIENT_LOG(format, arg...) fprintf(stderr, "[ SERVER ]"format"\n",##arg)
+
 void conver_hex_to_str(BYTE *hex, int hex_len, BYTE *str, int str_len)
 {
 	int i;
 	if(hex_len*2 >= str_len){
-		BASE_LOG_ERROR("buf invalid.");
+		CLIENT_LOG("buf invalid.");
 		return;
 	}
 	for(i = 0; i < hex_len; i++){
@@ -87,7 +90,7 @@ int new_session_start(const struct arpc_new_session_req *client, struct arpc_new
 		sprintf(file_path, "./rev_%s", (char *)usr_context);
 		fp = fopen(file_path, "w");
 		if (!fp){
-			BASE_LOG_ERROR("fopen path:%s fail.\n", file_path);
+			CLIENT_LOG("fopen path:%s fail.\n", file_path);
 			return 0;
 		}
 		fclose(fp);
@@ -123,12 +126,12 @@ static int process_oneway_async(const struct arpc_vmsg *req_iov, uint32_t *flags
 	SHA256_CTX ctx;
 
 	if (!req_iov){
-		BASE_LOG_ERROR("null inputn");
+		CLIENT_LOG("null inputn");
 		return 0;
 	}
-	BASE_LOG_NOTICE("oneway async------head len:%u.\n", req_iov->head_len);
+	CLIENT_LOG("oneway async------head len:%u.\n", req_iov->head_len);
 	memcpy(g_buf_str, req_iov->head, 64);
-	BASE_LOG_NOTICE("rx sha256:%s.", (char*)g_buf_str);
+	CLIENT_LOG("rx sha256:%s.", (char*)g_buf_str);
 	arpc_cond_lock(&g_cond);
 	arpc_cond_notify(&g_cond);
 	arpc_cond_unlock(&g_cond);
@@ -154,6 +157,132 @@ static struct arpc_session_ops ops ={
 	}
 };
 
+static const char *g_filepath = NULL;
+
+int session_send_msg(arpc_session_handle_t session_fd)
+{
+	uint32_t				i = 0;
+	int 					ret = 0;
+	uint64_t				offset = 0,send_len = 0, file_len =0;
+	struct arpc_msg *request =NULL;
+	struct arpc_msg_param p;
+	const char *file_path = NULL;
+	FILE *fp = NULL;
+	BYTE buf[SHA256_BLOCK_SIZE];
+	BYTE buf_str[SHA256_BLOCK_SIZE*2 +1];
+	SHA256_CTX ctx;
+
+	file_path = g_filepath;
+	fp = fopen(file_path, "rb");
+    if(!fp) { 
+         printf("can not open this file[%s],or not exist!\n", file_path);
+         return -1; 
+    }
+	fseek(fp, 0, SEEK_END);
+	file_len = ftell(fp);
+	rewind(fp);
+	printf("-----file_size:%lu\n", file_len);
+
+	// 新建消息
+	request = arpc_new_msg(NULL);
+
+	while(offset < file_len){
+		sha256_init(&ctx);
+		send_len = ((file_len - offset) > DATA_DEFAULT_MAX_LEN)? DATA_DEFAULT_MAX_LEN: (file_len - offset);
+		printf("\n_____send_len:%lu, left_size:%lu____________\n", send_len, (file_len - offset));
+		request->send.total_data = send_len;
+		request->send.vec_num = (request->send.total_data % BUF_MAX_SIZE)?1:0;
+		request->send.vec_num += (request->send.total_data / BUF_MAX_SIZE);
+		request->proc_rsp_cb = NULL;
+
+		// 读取文件
+		request->send.vec = malloc(request->send.vec_num * sizeof(struct arpc_iov));
+		for (i = 0; i  < request->send.vec_num -1; i++) {
+			fseek(fp, i*BUF_MAX_SIZE + offset, SEEK_SET);
+			request->send.vec[i].data = malloc(BUF_MAX_SIZE);
+			request->send.vec[i].len = fread(request->send.vec[i].data, 1, BUF_MAX_SIZE, fp);
+			if (request->send.vec[i].len < BUF_MAX_SIZE){
+				if(feof(fp)){
+					break;
+				}
+			}
+			sha256_update(&ctx, request->send.vec[i].data, request->send.vec[i].len);
+		}
+		fseek(fp, i*BUF_MAX_SIZE + offset, SEEK_SET);
+		offset += send_len;
+		send_len = (send_len % BUF_MAX_SIZE);
+		send_len = (send_len)?send_len:BUF_MAX_SIZE;
+		request->send.vec[i].data = malloc(send_len);
+		request->send.vec[i].len = fread(request->send.vec[i].data, 1, send_len, fp);
+		if (request->send.vec[i].len < send_len){
+			printf("fread len fail\n");
+		}
+		sha256_update(&ctx, request->send.vec[i].data, request->send.vec[i].len);
+		sha256_final(&ctx, buf);
+
+		conver_hex_to_str(buf, sizeof(buf), buf_str, sizeof(buf_str));
+		printf("send data sha256:%s.\n", (char*)buf_str);
+
+		request->send.head_len = strlen((char*)buf_str) + 1;
+		request->send.head = (char *)buf_str;
+
+		arpc_cond_lock(&g_cond);
+		ret = arpc_send_oneway_msg(session_fd, &request->send, NULL, NULL);
+		if (ret != 0){
+			printf("arpc_send_oneway_msg fail\n");
+		}
+		// oneway
+		ret = arpc_cond_wait_timeout(&g_cond, 3000);
+		arpc_cond_unlock(&g_cond);
+
+		if(strncmp((char*)g_buf_str, (char*)buf_str, SHA256_BLOCK_SIZE*2) != 0){
+			printf("oneway send error:: data error.\n");
+		}else{
+			printf("oneway send success:: data success.\n");
+		}
+
+		// do request
+
+		/*ret = arpc_do_request(session_fd, request, 5*1000);
+		if (!ret){
+			for (i = 0; i < request->send.vec_num; i++) {
+				if (request->send.vec[i].data){
+					free(request->send.vec[i].data);
+				}
+			}
+			assert(strncmp(request->receive.head, (char*)buf_str, SHA256_BLOCK_SIZE*2) == 0);
+		}else{
+			printf("arpc_do_request fail\n");
+		}
+		free(request->send.vec);
+		request->send.vec = NULL;
+		arpc_reset_msg(request);*/
+	}
+	arpc_delete_msg(&request);
+	if(fp)
+		fclose(fp);
+	return 0;
+}
+
+#define MAX_THREADS 	16
+#define MAX_LOOP_TIMES 	96000
+
+static void *worker_thread(void *data)
+{
+	arpc_session_handle_t session_fd = data;
+	int64_t i =0;
+	int ret;
+
+	while(i++ < MAX_LOOP_TIMES){
+		ret = session_send_msg(session_fd);
+		if (ret){
+			printf("error: thread[%lu] fail.\n", pthread_self());
+			break;
+		}
+	}
+	printf("thread[%lu] exit success.\n", pthread_self());
+	return NULL;
+}
 /*---------------------------------------------------------------------------*/
 /* main									     */
 /*---------------------------------------------------------------------------*/
@@ -162,16 +291,17 @@ int main(int argc, char *argv[])
 	uint32_t				i = 0;
 	int 					ret = 0;
 	uint64_t				offset = 0,send_len = 0, file_len =0;
+	pthread_t		g_thread_id[MAX_THREADS] = {0};
 
 	struct arpc_client_session_param param;
-	struct arpc_msg *requst =NULL;
+	struct arpc_msg *request =NULL;
 	arpc_session_handle_t session_fd;
 	struct arpc_msg_param p;
-	char *file_path = NULL;
 	FILE *fp = NULL;
 	BYTE buf[SHA256_BLOCK_SIZE];
 	BYTE buf_str[SHA256_BLOCK_SIZE*2 +1];
 	SHA256_CTX ctx;
+	struct aprc_option opt = {0};
 
 	if (argc < 5) {
 		printf("Usage: %s <host> <port> <file path> <req data>. \n", argv[0]);
@@ -180,18 +310,14 @@ int main(int argc, char *argv[])
 	arpc_cond_init(&g_cond);
 
 	printf("input:<%s> <%s> <%s> <%s>\n", argv[1], argv[2], argv[3], argv[4]);
-	file_path = argv[3];
-	fp = fopen(file_path, "rb");
-    if(!fp) { 
-         printf("can not open this file[%s],or not exist!\n", file_path);
-         return 0; 
-    }
-	fseek(fp, 0, SEEK_END);
-	file_len = ftell(fp);
-	rewind(fp);
-	printf("-----file_size:%lu\n", file_len);
-	arpc_init();
+	
+	g_filepath = argv[3];
+
+	SET_FLAG(opt.control, ARPC_E_CTRL_CRC); //开启通信CRC检查
+
+	arpc_init_r(&opt);
 	// 创建session
+	memset(&param, 0, sizeof(param));
 	param.con.type = ARPC_E_TRANS_TCP;
 	memcpy(param.con.ipv4.ip, argv[1], IPV4_MAX_LEN);
 	param.con.ipv4.port = atoi(argv[2]);
@@ -205,90 +331,17 @@ int main(int argc, char *argv[])
 		printf("arpc_client_create_session fail\n");
 		goto end;
 	}
-
-	// 新建消息
-	requst = arpc_new_msg(NULL);
-
-	while(offset < file_len){
-		sha256_init(&ctx);
-		send_len = ((file_len - offset) > DATA_DEFAULT_MAX_LEN)? DATA_DEFAULT_MAX_LEN: (file_len - offset);
-		printf("\n_____send_len:%lu, left_size:%lu____________\n", send_len, (file_len - offset));
-		requst->send.head_len = strlen(file_path);
-		requst->send.head = file_path;
-		requst->send.total_data = send_len;
-		requst->send.vec_num = (requst->send.total_data % BUF_MAX_SIZE)?1:0;
-		requst->send.vec_num += (requst->send.total_data / BUF_MAX_SIZE);
-		requst->proc_rsp_cb = NULL;
-
-		// 读取文件
-		requst->send.vec = malloc(requst->send.vec_num * sizeof(struct arpc_iov));
-		for (i = 0; i  < requst->send.vec_num -1; i++) {
-			fseek(fp, i*BUF_MAX_SIZE + offset, SEEK_SET);
-			requst->send.vec[i].data = malloc(BUF_MAX_SIZE);
-			requst->send.vec[i].len = fread(requst->send.vec[i].data, 1, BUF_MAX_SIZE, fp);
-			if (requst->send.vec[i].len < BUF_MAX_SIZE){
-				if(feof(fp)){
-					break;
-				}
-			}
-			sha256_update(&ctx, requst->send.vec[i].data, requst->send.vec[i].len);
-		}
-		fseek(fp, i*BUF_MAX_SIZE + offset, SEEK_SET);
-		offset += send_len;
-		send_len = (send_len % BUF_MAX_SIZE);
-		send_len = (send_len)?send_len:BUF_MAX_SIZE;
-		requst->send.vec[i].data = malloc(send_len);
-		requst->send.vec[i].len = fread(requst->send.vec[i].data, 1, send_len, fp);
-		if (requst->send.vec[i].len < send_len){
-			printf("fread len fail\n");
-		}
-		sha256_update(&ctx, requst->send.vec[i].data, requst->send.vec[i].len);
-		sha256_final(&ctx, buf);
-
-		conver_hex_to_str(buf, sizeof(buf), buf_str, sizeof(buf_str));
-		printf("send data sha256:%s.\n", (char*)buf_str);
-
-		arpc_cond_lock(&g_cond);
-		ret = arpc_send_oneway_msg(session_fd, &requst->send, NULL, NULL);
-		if (ret != 0){
-			printf("arpc_send_oneway_msg fail\n");
-		}
-		// oneway
-		ret = arpc_cond_wait_timeout(&g_cond, 1000);
-		arpc_cond_unlock(&g_cond);
-
-		if(strncmp((char*)g_buf_str, (char*)buf_str, SHA256_BLOCK_SIZE*2) != 0){
-			printf("oneway send error:: data error.\n");
-		}else{
-			printf("oneway send success:: data success.\n");
-		}
-
-		// do request
-
-		ret = arpc_do_request(session_fd, requst, -1);
-		if (ret != 0){
-			printf("arpc_do_request fail\n");
-		}
-
-		for (i = 0; i < requst->send.vec_num; i++) {
-			if (requst->send.vec[i].data){
-				free(requst->send.vec[i].data);
-			}
-		}
-
-		if(strncmp(requst->receive.head, (char*)buf_str, SHA256_BLOCK_SIZE*2) != 0){
-			printf("do request error:: data error.\n");
-		}else{
-			printf("do request success:: data success.\n");
-		}
-
-		free(requst->send.vec);
-		requst->send.vec = NULL;
-		arpc_reset_msg(requst);
+	arpc_sleep(3);
+	for (i = 0; i < MAX_THREADS; i++) {
+		pthread_create(&g_thread_id[i], NULL, worker_thread, session_fd);
 	}
-	arpc_delete_msg(&requst);
+
+	/* join the threads */
+	for (i = 0; i < MAX_THREADS; i++)
+		pthread_join(g_thread_id[i], NULL);
+
 	arpc_client_destroy_session(&session_fd);
-	printf("file send complete:%s.\n\n", file_path);
+	printf("file send complete:%s.\n\n", g_filepath);
 end:
 	if (fp)
 		fclose(fp);

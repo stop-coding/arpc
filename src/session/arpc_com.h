@@ -23,6 +23,7 @@
 #include <inttypes.h>
 #include <assert.h>
 #include <sys/time.h>
+#include <pthread.h>
 
 #include "base_log.h"
 #include "queue.h"
@@ -30,6 +31,7 @@
 
 #include "libxio.h"
 #include "arpc_api.h"
+#include "arpc_proto.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -48,9 +50,6 @@ extern "C" {
 #define URI_MAX_LEN 	256
 #define MAX_DATA_SEG_LEN 1024
 #define DEFAULT_DEPTH 	4
-
-#define RETRY_MAX_TIME	10	/* session断开自动重连次数*/
-#define SERVER_DOWN_WAIT_TIME		10
 
 #define IS_SET(flag, tag) (flag&(tag))
 #define SET_FLAG(flag, tag) flag=(flag|(tag))
@@ -75,15 +74,6 @@ extern "C" {
 
 #define IS_SET_RSP(flag) (flag&(XIO_MSG_RSP)
 #define IS_SET_REQ(flag) (flag&XIO_MSG_REQ)
-
-#define TO_FREE_USER_DATA_BUF(ops, usr_ctx, iov, iov_num, i)	\
-do{\
-	for(i = 0; i < iov_num; i++){\
-		if(iov[i].data)\
-			ops(iov[i].data, usr_ctx);\
-		iov[i].data = NULL;\
-	}\
-}while(0);
 
 // 互斥锁
 struct arpc_mutex{
@@ -319,8 +309,13 @@ void debug_printf_msg(struct xio_msg *rsp);
 int post_to_async_thread(struct arpc_thread_param *param);
 
 int create_xio_msg_usr_buf(struct xio_msg *msg, struct proc_header_func *ops, uint64_t iov_max_len, void *usr_ctx);
-int destroy_xio_msg_usr_buf(struct arpc_vmsg *rev_iov, mem_free_cb_t free_cb, void *usr_ctx);
+int destroy_xio_msg_usr_buf(struct xio_msg *msg, mem_free_cb_t free_cb, void *usr_ctx);
 
+int move_msg_xio2arpc(struct xio_vmsg *xio_msg, struct arpc_vmsg *msg, struct arpc_msg_attr *attr);
+void free_msg_xio2arpc(struct arpc_vmsg *msg, mem_free_cb_t free_cb, void *usr_ctx);
+
+int convert_msg_arpc2xio(const struct arpc_vmsg *usr_msg, struct xio_vmsg *xio_msg, struct arpc_msg_attr *attr);
+void free_msg_arpc2xio(struct xio_vmsg *xio_msg);
 
 #ifdef __cplusplus
 }

@@ -43,13 +43,25 @@ struct aprc_option{
 	uint32_t  tx_queue_max_depth;  	/*! @brief  发送消息缓冲队列深度度[64, 1024]， 512*/
 	uint64_t  tx_queue_max_size;    /*! @brief 发送消息缓冲队列buf大小，单位B, 默认64M*/
 	uint32_t  rx_queue_max_depth;  	/*! @brief  接收消息缓冲队列深度度[64, 1024], 默认512*/
-	uint64_t  rx_queue_max_size;    /*! @brief 接收消息缓冲队列buf大小，单位B， 默认64M, 消息长度越大，该值也越大，否则会经常发送失败*/
+	uint64_t  rx_queue_max_size;    /*! @brief 接收消息缓冲队列buf大小，单位B， 默认64M, 消息长度越大，该值也越大*/
+	uint32_t  control;				/*! @brief 控制属性,按位标识，属性详细见如下定义*/
+};
+
+/*!
+ *  @brief  arpc全局控制属性
+ *		使用方法，设置SET_METHOD(opt.control, ARPC_E_CTRL_CRC|ARPC_E_CTRL_MAX);
+ *
+ */
+enum arpc_ctrl_attr{
+	ARPC_E_CTRL_NONE = 0,
+	ARPC_E_CTRL_CRC = (1<<0), 		/*! @brief 开启通信crc校验，默认关闭*/
+	ARPC_E_CTRL_MAX = (1<<31), 		/*! @brief 最大标记位*/
 };
 
 /*!
  *  @brief  arpc消息框架全局初始化，支持参数设置
  *
- *  @param[in] opt  aprc参数
+ *  @param[in] opt  arpc参数
  *  @return  arpc_session_handle_t; (<em>NULL</em>: fail ; ( <em>非NULL</em>: succeed
  *
  */
@@ -513,7 +525,7 @@ struct arpc_new_session_rsp{
 	enum arpc_new_session_status	ret_status;					/*! @brief 应答当前新建session调用者返回值，ARPC_E_STATUS_OK是可以建立，其它则失败*/
 	struct arpc_session_ops			*ops;						/*! @brief 设置当前session的回调函数，可选，默认使用注册时回调函数*/
 	void							*ops_new_ctx;				/*! @brief 新session的回调函数上下文参数 */
-	void							*private;					/*! @brief 调用者私有数据 */
+	void							*private;					/*! @brief 调用者私有数据,是server返回给client申请者 */
 	uint32_t						private_len;				/*! @brief 调用者私有数据长度 */
 };
 

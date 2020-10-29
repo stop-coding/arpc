@@ -24,6 +24,7 @@
 #include "arpc_com.h"
 #include "threadpool.h"
 #include "arpc_response.h"
+#include "crc64.h"
 
 struct aprc_paramter{
 	uint16_t is_init;
@@ -38,15 +39,15 @@ static struct aprc_paramter g_param= {
 	.thread_pool	= NULL,
 	.mutex			= {.lock = PTHREAD_MUTEX_INITIALIZER},
 	.opt			= {
-						.thread_max_num = 10,
+						.thread_max_num = 12,
 						.cpu_max_num    = 16,
 						.msg_head_max_len = MAX_HEADER_DATA_LEN,
 						.msg_data_max_len = DATA_DEFAULT_MAX_LEN,
 						.msg_iov_max_len  = IOV_DEFAULT_MAX_LEN,
 						.tx_queue_max_depth = 1024,
-						.tx_queue_max_size  = (64*1024*1024),
+						.tx_queue_max_size  = (128*1024*1024),
 						.rx_queue_max_depth = 1024,
-						.rx_queue_max_size  = (64*1024*1024),
+						.rx_queue_max_size  = (128*1024*1024),
 					}
 	
 };
@@ -64,6 +65,7 @@ static void set_user_option(const struct aprc_option *opt, struct aprc_option *o
 	 out_opt->tx_queue_max_size = (opt->tx_queue_max_size >= (8*1024*1024) && opt->tx_queue_max_size <= (1024*1024*1024))?opt->tx_queue_max_size:out_opt->tx_queue_max_size;
 	 out_opt->rx_queue_max_depth = (opt->rx_queue_max_depth >= 128 && opt->rx_queue_max_depth <= (4*1024))?opt->rx_queue_max_depth:out_opt->rx_queue_max_depth;
 	 out_opt->rx_queue_max_size = (opt->rx_queue_max_size >= (8*1024*1024) && opt->rx_queue_max_size <= (1024*1024*1024))?opt->rx_queue_max_size:out_opt->rx_queue_max_size;
+	 out_opt->control = opt->control;
 }
 
 static void set_xio_option(const struct aprc_option *opt)
@@ -113,6 +115,8 @@ static void set_xio_option(const struct aprc_option *opt)
 
 }
 
+static inline void arpc_crc_init();
+static inline uint64_t arpc_cal_crc64(uint64_t crc, const unsigned char *data, uint64_t len);
 
 int arpc_init_r(struct aprc_option *opt)
 {
@@ -135,6 +139,7 @@ int arpc_init_r(struct aprc_option *opt)
 	arpc_mutex_unlock(&g_param.mutex);
 	xio_init();
 	set_xio_option(&g_param.opt);
+	arpc_crc_init();
 	return 0;
 }
 int arpc_init()
@@ -155,6 +160,7 @@ int arpc_init()
 	arpc_mutex_unlock(&g_param.mutex);
 	xio_init();
 	set_xio_option(&g_param.opt);
+	arpc_crc_init();
 	return 0;
 }
 
@@ -274,7 +280,7 @@ int post_to_async_thread(struct arpc_thread_param *param)
 
 int create_xio_msg_usr_buf(struct xio_msg *msg, struct proc_header_func *ops, uint64_t iov_max_len, void *usr_ctx)
 {
-	struct xio_iovec	*sglist =NULL;
+	struct xio_iovec_ex	*sglist =NULL;
 	uint32_t			nents = 0;
 	struct arpc_header_msg header;
 	uint32_t flag = 0;
@@ -320,20 +326,24 @@ int create_xio_msg_usr_buf(struct xio_msg *msg, struct proc_header_func *ops, ui
 	last_size = msg->in.total_data_len%iov_max_len;
 	nents = (last_size)? 1: 0;
 	nents += (msg->in.total_data_len / iov_max_len);
-	sglist = (struct xio_iovec* )arpc_mem_alloc(nents * sizeof(struct xio_iovec), NULL);
+	sglist = (struct xio_iovec_ex* )arpc_mem_alloc(nents * sizeof(struct xio_iovec_ex), NULL);
 	last_size = (last_size)? last_size :iov_max_len;
 
 	ARPC_LOG_DEBUG("get msg, nent:%u, iov_max_len:%lu, total_size:%lu, sglist:%p", nents, iov_max_len, msg->in.total_data_len, sglist);
 	for (i = 0; i < nents - 1; i++) {
 		sglist[i].iov_len = iov_max_len;
 		sglist[i].iov_base = ops->alloc_cb(iov_max_len, usr_ctx);
+		sglist[i].mr = NULL;
+		sglist[i].user_context = NULL;
 		LOG_THEN_GOTO_TAG_IF_VAL_TRUE((!sglist[i].iov_base), error_1, "calloc fail.");
 	}
 	sglist[i].iov_len = last_size;
 	sglist[i].iov_base = ops->alloc_cb(iov_max_len, usr_ctx);
+	sglist[i].mr = NULL;
+	sglist[i].user_context = NULL;
 	ARPC_LOG_DEBUG("i:%u ,data:%p, len:%lu.",i, sglist[i].iov_base, sglist[i].iov_len);
 	// 出参
-	msg->in.data_tbl.sglist = (void*)sglist;
+	msg->in.pdata_iov.sglist = (void*)sglist;
 	vmsg_sglist_set_nents(&msg->in, nents);
 	msg->in.sgl_type		= XIO_SGL_TYPE_IOV_PTR;
 	SET_FLAG(msg->usr_flags, METHOD_ALLOC_DATA_BUF);
@@ -355,22 +365,248 @@ error_1:
 	return -1;
 }
 
-int destroy_xio_msg_usr_buf(struct arpc_vmsg *rev_iov, mem_free_cb_t free_cb, void *usr_ctx)
+int destroy_xio_msg_usr_buf(struct xio_msg *msg, mem_free_cb_t free_cb, void *usr_ctx)
 {
 	uint32_t i;
+	uint32_t nents;
+	struct xio_iovec_ex	*sglist =NULL;
 
-	LOG_THEN_RETURN_VAL_IF_TRUE((!rev_iov), ARPC_ERROR, "msg null.");
+	LOG_THEN_RETURN_VAL_IF_TRUE((!msg), ARPC_ERROR, "msg null.");
 	LOG_THEN_RETURN_VAL_IF_TRUE((!free_cb), ARPC_ERROR, "alloc free is null.");
 
-	for (i = 0; i < rev_iov->vec_num; i++) {
-		if (rev_iov->vec[i].data)
-			free_cb(rev_iov->vec[i].data, usr_ctx);
-	}
-	if (rev_iov->vec_num && rev_iov->vec){
-		arpc_mem_free(rev_iov->vec, NULL);
+	if (IS_SET(msg->usr_flags, METHOD_ALLOC_DATA_BUF)) {
+		nents = vmsg_sglist_nents(&msg->in);
+		sglist = vmsg_sglist(&msg->in);
+		for (i = 0; i < nents; i++) {
+			if (sglist[i].iov_base)
+				free_cb(sglist[i].iov_base, usr_ctx);
+			sglist[i].iov_base = NULL;
+			sglist[i].iov_len = 0;
+		}
+		if (sglist){
+			arpc_mem_free(sglist, NULL);
+		}
+		vmsg_sglist_set_nents(&msg->in, 0);
+		msg->in.pdata_iov.sglist = NULL;
+		msg->in.total_data_len = 0;
+		msg->in.sgl_type = XIO_SGL_TYPE_IOV;
 	}
 	
 	return 0;
+}
+
+static int unpack_msg_head(uint8_t *rx_head, uint32_t rx_head_len, struct arpc_msg_attr *attr, void **usr_head, uint32_t *usr_head_len)
+{
+	void *req_addr;
+	uint8_t *ptr;
+	uint64_t req_len = 0;
+	arpc_proto_t tlv_type = 0;
+	int32_t index = 0;
+	int32_t ret;
+
+	if (rx_head_len < 2 * sizeof(struct arpc_tlv) + sizeof(struct arpc_msg_attr)) {
+		return -1;
+	}
+	index = arpc_read_tlv(&tlv_type, &req_len, &req_addr, rx_head);
+	if(index < 0 || tlv_type != ARPC_PROTO_MSG_INTER_HEAD || req_len != sizeof(struct arpc_msg_attr)){
+		return -1;
+	}
+	ret = unpack_msg_attr(req_addr, req_len, attr);
+	LOG_THEN_RETURN_VAL_IF_TRUE(ret < 0, ARPC_ERROR, "unpack_msg_attr fail.");
+	req_addr = NULL;
+	req_len = 0;
+
+	index = arpc_read_tlv(&tlv_type, &req_len, &req_addr, rx_head + index);
+	if(index < 0 || tlv_type != ARPC_PROTO_MSG_USER_HEAD || req_len > 64*1024 || !req_addr){
+		return -1;
+	}
+	*usr_head_len = req_len;
+	*usr_head = req_addr;
+	return 0;
+}
+
+static void hexdump(char *addr, uint64_t len)
+{
+	int i;
+	fprintf(stderr,"\n-------------------len:%lu------------------------\n", len);
+	for (i = 0; i < len; i++) {
+		fprintf(stderr,"0x%02x ", addr[i]);
+	}
+	fprintf(stderr,"\n-------------------------------------------\n");
+	return;
+}
+
+int move_msg_xio2arpc(struct xio_vmsg *xio_msg, struct arpc_vmsg *msg, struct arpc_msg_attr *attr)
+{
+	struct xio_iovec_ex  *sglist = NULL;
+	uint32_t			nents = 0;
+	uint32_t 			i;
+	int 				ret;
+	uint64_t 			crc = 0;
+	void 				*usr_addr;
+	struct arpc_msg_attr proto = {0};
+	
+	LOG_THEN_RETURN_VAL_IF_TRUE((!xio_msg), ARPC_ERROR, "xio_msg null, exit.");
+	LOG_THEN_RETURN_VAL_IF_TRUE((!msg), ARPC_ERROR, "msg null, exit.");
+	LOG_THEN_RETURN_VAL_IF_TRUE((!xio_msg->header.iov_base), ARPC_ERROR, "head null, exit.");
+
+	ret = unpack_msg_head((uint8_t *)xio_msg->header.iov_base, xio_msg->header.iov_len, &proto, &usr_addr, &msg->head_len);
+	if (ret){
+		msg->head_len = xio_msg->header.iov_len;
+		usr_addr = xio_msg->header.iov_base;
+	}
+
+	if (msg->head_len) {
+		msg->head = arpc_mem_alloc(msg->head_len, NULL);
+		memcpy(msg->head, usr_addr, msg->head_len);
+		crc = arpc_cal_crc64(crc, (const unsigned char *)msg->head, msg->head_len);
+	}
+	nents = vmsg_sglist_nents(xio_msg);
+	msg->total_data = 0;
+	msg->vec =NULL;
+	msg->vec_num = 0;
+	if (nents && (xio_msg->sgl_type == XIO_SGL_TYPE_IOV_PTR)){
+		sglist = vmsg_sglist(xio_msg);
+		msg->vec = (struct arpc_iov *)arpc_mem_alloc(nents * sizeof(struct arpc_iov), NULL);
+		LOG_THEN_GOTO_TAG_IF_VAL_TRUE((!msg->vec), fail_out,"vec alloc is empty.");
+		for(i = 0; i < nents; i++){
+			msg->vec[i].data = sglist[i].iov_base;
+			msg->vec[i].len	= sglist[i].iov_len;
+			msg->total_data +=msg->vec[i].len;
+			crc = arpc_cal_crc64(crc, (const unsigned char *)msg->vec[i].data, msg->vec[i].len);
+			sglist[i].iov_base = NULL;
+			sglist[i].iov_len = 0; 
+			assert(msg->vec[i].data);
+			assert(msg->vec[i].len);
+		}
+		msg->vec_num = nents;
+		vmsg_sglist_set_nents(xio_msg, 0);
+		msg->vec_type = ARPC_VEC_TYPE_PRT;
+	}else{
+		if (!msg->head_len) {
+			ARPC_LOG_ERROR("no header and data in msg.");
+		}
+		msg->vec_type = ARPC_VEC_TYPE_NONE;
+	}
+	if (attr){
+		attr->req_crc = proto.req_crc;
+		attr->rsp_crc = proto.rsp_crc;
+	}
+	ARPC_LOG_DEBUG("rx crc:0x%lx, cal crc:0x%lx", proto.req_crc, crc);
+	if (crc && proto.req_crc){
+		// 确保两边都开启crc才有意义,0 默认不开启
+		ARPC_ASSERT(proto.req_crc == crc, "crc check fail.");
+		LOG_THEN_GOTO_TAG_IF_VAL_TRUE((proto.req_crc != crc), fail_out, 
+									"crc check fail, rx crc:0x%lx, but cal crc:0x%lx.", 
+									proto.req_crc, 
+									crc);
+	}
+	return 0;
+fail_out:
+	SAFE_FREE_MEM(msg->head);
+	msg->head_len = 0;
+	SAFE_FREE_MEM(msg->vec);
+	msg->vec_num = 0;
+	msg->total_data = 0;
+	return 0;
+}
+
+void free_msg_xio2arpc(struct arpc_vmsg *msg, mem_free_cb_t free_cb, void *usr_ctx)
+{
+	int i;
+	LOG_THEN_RETURN_IF_VAL_TRUE((!msg), "msg null, exit.");
+	LOG_THEN_RETURN_IF_VAL_TRUE((!free_cb), "free_cb null, exit.");
+
+	if (msg->vec_type == ARPC_VEC_TYPE_PRT && msg->vec){
+		for(i = 0; i < msg->vec_num; i++){
+			if (msg->vec[i].data){
+				free_cb(msg->vec[i].data, usr_ctx);
+				msg->vec[i].data = NULL;
+			}
+			msg->vec[i].len = 0;
+		}
+		SAFE_FREE_MEM(msg->vec);
+		msg->vec_num =0;
+		msg->total_data =0;
+		msg->vec_type = ARPC_VEC_TYPE_NONE;
+	}
+	SAFE_FREE_MEM(msg->head);
+	return;
+}
+
+int convert_msg_arpc2xio(const struct arpc_vmsg *usr_msg, struct xio_vmsg *xio_msg, struct arpc_msg_attr *attr)
+{
+	uint32_t i;
+	uint32_t index = 0;
+	uint8_t  *ptr;
+	uint64_t crc = 0;
+	struct arpc_msg_attr proto = {0};
+	void *read_add = NULL;
+	uint32_t read_len = 0;
+
+	LOG_THEN_RETURN_VAL_IF_TRUE((!attr), ARPC_ERROR, "attr null, exit.");
+	/* header */
+	crc = arpc_cal_crc64(crc, (const unsigned char *)usr_msg->head, usr_msg->head_len);
+	xio_msg->pdata_iov.max_nents = usr_msg->vec_num;
+	xio_msg->pdata_iov.nents = usr_msg->vec_num;
+	xio_msg->total_data_len = 0;
+	if (xio_msg->pdata_iov.nents) {
+		xio_msg->pdata_iov.sglist = (struct xio_iovec_ex *)arpc_mem_alloc((xio_msg->pdata_iov.nents) * sizeof(struct xio_iovec_ex), NULL);
+		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!xio_msg->pdata_iov.sglist, data_null, "arpc_mem_alloc fail.");
+		memset(xio_msg->pdata_iov.sglist, 0, xio_msg->pdata_iov.nents * sizeof(struct xio_iovec_ex));
+		xio_msg->pad = 1;
+		for (i = 0; i < xio_msg->pdata_iov.nents; i++){
+			ARPC_ASSERT(usr_msg->vec[i].data, "data is null.");
+			ARPC_ASSERT(usr_msg->vec[i].len, "data len is 0.");
+			xio_msg->pdata_iov.sglist[i].iov_base = usr_msg->vec[i].data;
+			xio_msg->pdata_iov.sglist[i].iov_len = usr_msg->vec[i].len;
+			crc = arpc_cal_crc64(crc, (const unsigned char *)usr_msg->vec[i].data, usr_msg->vec[i].len);
+			xio_msg->total_data_len += xio_msg->pdata_iov.sglist[i].iov_len;
+		}
+		xio_msg->sgl_type = XIO_SGL_TYPE_IOV_PTR;
+		ARPC_ASSERT(xio_msg->total_data_len <= DATA_DEFAULT_MAX_LEN, "total_data_len is over.");
+	}else{
+		xio_msg->sgl_type = XIO_SGL_TYPE_IOV;
+		xio_msg->data_iov.nents = 0;
+		xio_msg->data_iov.max_nents = XIO_IOVLEN;
+		xio_msg->pad = 0;
+	}
+
+	attr->req_crc = crc;
+
+	xio_msg->header.iov_len = 2 * sizeof(struct arpc_tlv) + sizeof(struct arpc_msg_attr) + usr_msg->head_len;
+	xio_msg->header.iov_base = arpc_mem_alloc(xio_msg->header.iov_len, NULL);
+	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!xio_msg->header.iov_base, data_null, "arpc_mem_alloc head buf fail.");
+
+	ptr = xio_msg->header.iov_base;
+	index = arpc_write_tlv(ARPC_PROTO_MSG_INTER_HEAD, sizeof(struct arpc_msg_attr), ptr);
+	ptr += sizeof(struct arpc_tlv);
+	pack_msg_attr(attr, ptr, sizeof(struct arpc_msg_attr));
+
+	ptr = (uint8_t*)xio_msg->header.iov_base + index;
+	index = arpc_write_tlv(ARPC_PROTO_MSG_USER_HEAD, usr_msg->head_len, ptr);
+	ptr += sizeof(struct arpc_tlv);
+	memcpy(ptr, usr_msg->head, usr_msg->head_len);
+	ARPC_LOG_DEBUG("send crc:0x%lx", crc);
+	return 0;
+data_null:
+	xio_msg->header.iov_base = 0;
+	xio_msg->header.iov_len = 0;
+	xio_msg->pdata_iov.max_nents =0;
+	xio_msg->pdata_iov.nents = 0;
+	xio_msg->pdata_iov.sglist = NULL;
+	return -1;
+}
+
+void free_msg_arpc2xio(struct xio_vmsg *xio_msg)
+{
+	struct xio_msg 	*req = NULL;
+	if ((xio_msg->pad) && xio_msg->pdata_iov.sglist){
+		SAFE_FREE_MEM(xio_msg->pdata_iov.sglist);
+		xio_msg->pad = 0;
+	}
+	SAFE_FREE_MEM(xio_msg->header.iov_base);
+	return;
 }
 
 struct arpc_common_msg *arpc_create_common_msg(uint32_t ex_data_size)
@@ -499,3 +735,19 @@ int arpc_uri_get_proto(const char *uri, char *proto, int proto_len)
 
 	return -1;
 }
+
+static inline void arpc_crc_init()
+{
+	if(IS_SET(g_param.opt.control, ARPC_E_CTRL_CRC)){
+		crc64_init();
+	}
+}
+
+static inline uint64_t arpc_cal_crc64(uint64_t crc, const unsigned char *data, uint64_t len)
+{
+	if(IS_SET(g_param.opt.control, ARPC_E_CTRL_CRC)){
+		return crc64(crc, data, len);
+	}
+	return 0;
+}
+

@@ -539,6 +539,7 @@ static int xio_tcp_prep_req_header(struct xio_tcp_transport *tcp_hndl,
 	req_hdr.out_tcp_op	= tcp_task->out_tcp_op;
 	req_hdr.flags		= 0;
 
+	task->imsg.sn = task->ltid;//保存tid
 	if (test_bits(XIO_MSG_FLAG_PEER_WRITE_RSP, &task->omsg_flags))
 		set_bits(XIO_MSG_FLAG_PEER_WRITE_RSP, &req_hdr.flags);
 	else if (test_bits(XIO_MSG_FLAG_LAST_IN_BATCH, &task->omsg_flags))
@@ -567,7 +568,6 @@ static int xio_tcp_prep_req_header(struct xio_tcp_transport *tcp_hndl,
 	/* write the pad between header and data */
 	if (ulp_pad_len)
 		xio_mbuf_inc(&task->mbuf, ulp_pad_len);
-
 	return 0;
 
 cleanup:
@@ -2212,7 +2212,7 @@ void xio_tcp_dual_sock_set_rxd(struct xio_task *task,
 void xio_tcp_dual_sock_set_rxd_iov(struct xio_task *task,
 			       void	*msg_iov, uint32_t msg_len, uint64_t total_len)
 {
-	struct iovec *ptr_iov = (struct iovec *)msg_iov;
+	struct xio_iovec_ex *ptr_iov = (struct xio_iovec_ex *)msg_iov;
 	uint32_t i = 0;
 	XIO_TO_TCP_TASK(task, tcp_task);
 	if(!ptr_iov || !msg_len){
@@ -2475,13 +2475,13 @@ static int xio_tcp_on_recv_req_header(struct xio_tcp_transport *tcp_hndl,
 				tcp_hndl->sock.ops->set_rxd(task, ulp_hdr, (uint32_t)req_hdr.ulp_imm_len);
 				imsg->in.sgl_type = XIO_SGL_TYPE_IOV;
 			}
-		}
-		else
+		}else{
 			// 协议消息，则内部分配内存处理
 			tcp_hndl->sock.ops->set_rxd(task, ulp_hdr,
 					req_hdr.ulp_hdr_len +
 					req_hdr.ulp_pad_len +
 					(uint32_t)req_hdr.ulp_imm_len);
+		}
 		sgtbl		= xio_sg_table_get(&imsg->in);
 		sgtbl_ops	= (struct xio_sg_table_ops *)
 					xio_sg_table_ops_get(imsg->in.sgl_type);
@@ -2597,6 +2597,9 @@ static int xio_tcp_on_recv_rsp_header(struct xio_tcp_transport *tcp_hndl,
 	task->sender_task =
 		xio_tcp_primary_task_lookup(tcp_hndl, rsp_hdr.rtid);
 	task->rtid       = rsp_hdr.ltid;
+	
+	assert(task->sender_task->imsg.sn ==  rsp_hdr.rtid);
+	task->sender_task->imsg.sn = 0;
 
 	tcp_sender_task = (struct xio_tcp_task *)task->sender_task->dd_data;
 
@@ -2634,7 +2637,7 @@ static int xio_tcp_on_recv_rsp_header(struct xio_tcp_transport *tcp_hndl,
 				imsg->user_context		= task->sender_task->omsg->user_context;
 			}
 			if(xio_tcp_alloc_data_buf(tcp_hndl, task)){
-				isgtbl = vmsg_base_sglist(&imsg->in);
+				isgtbl = vmsg_sglist(&imsg->in);
 				inents = vmsg_sglist_nents(&imsg->in);
 				tcp_hndl->sock.ops->set_rxd_iov(task, isgtbl, inents, rsp_hdr.ulp_imm_len);
 				set_bits(XIO_MSG_HINT_USER_ALLOC_DATA_BUF, &imsg->hints);

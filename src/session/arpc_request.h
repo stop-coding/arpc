@@ -36,6 +36,7 @@ struct arpc_oneway_handle {
 	struct xio_msg				x_req_msg;
     struct arpc_vmsg	        *send;
 	void 				        *send_ctx;
+	struct arpc_msg_attr        attr;
 	int (*clean_send_cb)(struct arpc_vmsg *send, void* send_ctx);
 };
 

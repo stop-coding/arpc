@@ -27,6 +27,7 @@
 #include "arpc_session.h"
 #include "arpc_xio_callback.h"
 #include "arpc_server.h"
+#include "arpc_proto.h"
 
 #ifdef 	_DEF_SESSION_SERVER
 
@@ -213,7 +214,7 @@ static int server_session_event(struct xio_session *session, struct xio_session_
 			param.id = work->affinity;
 			param.session = session_fd;
 			param.xio_con_ctx = work->work_ctx;
-			param.usr_ctx = work;
+			param.usr_ctx = session_fd->usr_context;
 			param.type = ARPC_CON_TYPE_SERVER;
 			param.xio_con = event_data->conn;
 			param.timeout_ms = XIO_INFINITE;
@@ -280,6 +281,10 @@ static int server_on_new_session(struct xio_session *session,struct xio_new_sess
 	struct xio_session_attr attr;
 	int ret;
 	char	**uri_vec;
+	void *req_addr;
+	uint64_t req_len = 0;
+	arpc_proto_t tlv_type = 0;
+	struct arpc_proto_new_session new_req = {0};
 	uint32_t i;
 	QUEUE* work_q;
 	uint32_t work_num = 0;
@@ -305,8 +310,15 @@ static int server_on_new_session(struct xio_session *session,struct xio_new_sess
 	ipv4->type =ARPC_E_TRANS_TCP;
 	arpc_get_ipv4_addr(&req->src_addr, ipv4->ipv4.ip, IPV4_MAX_LEN, &ipv4->ipv4.port);
 
-	client.client_data.data = req->private_data;
-	client.client_data.len = req->private_data_len;
+	if (req->private_data) {
+		arpc_read_tlv(&tlv_type, &req_len, &req_addr, req->private_data);
+		assert(tlv_type == ARPC_PROTO_NEW_SESSION);
+		assert(req_len == sizeof(struct arpc_proto_new_session));
+		unpack_new_session(req_addr, sizeof(struct arpc_proto_new_session), &new_req);
+	}
+
+	client.client_data.data = NULL;//todo
+	client.client_data.len = 0;
 
 	ret = server_fd->new_session_start(&client, &param, server_fd->usr_context);
 	LOG_THEN_GOTO_TAG_IF_VAL_TRUE((ret != ARPC_SUCCESS), reject, "new_session_start return fail.");
@@ -319,20 +331,10 @@ static int server_on_new_session(struct xio_session *session,struct xio_new_sess
 	new_session->xio_s = session;
 	new_session_ctx = (struct arpc_new_session_ctx *)new_session->ex_ctx;
 	new_session_ctx->server = server_fd;
-	if (param.ops_new_ctx)
-		new_session->usr_context = param.ops_new_ctx;
-	else
-		new_session->usr_context = server_fd->usr_context;
 	
-	if (param.ops) {
-		new_session->ops = *(param.ops);
-	}else{
-		new_session->ops = server_fd->ops;
-	}
-
-	new_session->msg_data_max_len = server_fd->msg_data_max_len;
-	new_session->msg_head_max_len = server_fd->msg_head_max_len;
-	new_session->msg_iov_max_len = server_fd->msg_iov_max_len;
+	new_session->msg_data_max_len = (new_req.max_data_len)?new_req.max_data_len:server_fd->msg_data_max_len;
+	new_session->msg_head_max_len = (new_req.max_head_len)?new_req.max_head_len:server_fd->msg_head_max_len;
+	new_session->msg_iov_max_len = (new_req.max_iov_len)?new_req.max_iov_len:server_fd->msg_iov_max_len;
 
 	attr.ses_ops = NULL;
 	attr.uri = NULL;
@@ -372,6 +374,16 @@ static int server_on_new_session(struct xio_session *session,struct xio_new_sess
 	ret = server_insert_session(server_fd, new_session);
 	LOG_ERROR_IF_VAL_TRUE(ret, "server_insert_session fail.");
 	server_fd->new_session_end((arpc_session_handle_t)new_session, &param, server_fd->usr_context);
+	if (param.ops_new_ctx)
+		new_session->usr_context = param.ops_new_ctx;
+	else
+		new_session->usr_context = server_fd->usr_context;
+	
+	if (param.ops) {
+		new_session->ops = *(param.ops);
+	}else{
+		new_session->ops = server_fd->ops;
+	}
 	ARPC_LOG_NOTICE("create new session[%p] success, client[%s:%u].", server_fd, ipv4->ipv4.ip, ipv4->ipv4.port);
 	return 0;
 reject:

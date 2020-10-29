@@ -36,6 +36,7 @@ struct arpc_rsp_handle {
 	struct xio_msg				x_req_msg;
     struct xio_msg				*x_rsp_msg;
 	struct arpc_vmsg 			*rsp_usr_iov;
+	struct arpc_msg_attr		attr;
 	int (*release_rsp_cb)(struct arpc_vmsg *rsp_iov, void* rsp_usr_ctx);
 	void *rsp_usr_ctx;
 };
