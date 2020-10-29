@@ -626,10 +626,10 @@ int check_xio_msg_valid(const struct arpc_connection *conn, const struct xio_vms
 									ctx->msg_data_max_len);
 	}
 	nents = vmsg_sglist_nents(pmsg);
-	if(nents > (ctx->msg_data_max_len/ctx->msg_iov_max_len)){
-		ARPC_LOG_ERROR("data depth over limit, nents:%u, max:%lu.", 
+	if(nents > XIO_IOVLEN){
+		ARPC_LOG_ERROR("data depth over limit, nents:%u, max:%u.", 
 						nents, 
-						(ctx->msg_data_max_len/ctx->msg_iov_max_len));
+						XIO_IOVLEN);
 		return -1;
 	}
 	return 0;
