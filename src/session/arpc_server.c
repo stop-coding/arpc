@@ -86,16 +86,16 @@ arpc_server_t arpc_server_create(const struct arpc_server_param *param)
 	LOG_THEN_GOTO_TAG_IF_VAL_TRUE((!req_ops->proc_head_cb || !req_ops->proc_data_cb), error_1, "proc_data_cb is null.");
 
 	con_param = param->con;
-	server->msg_iov_max_len  = (param->iov_max_len && param->iov_max_len <= (4*1024))?
+	server->msg_iov_max_len  = (param->iov_max_len && param->iov_max_len <= (DATA_DEFAULT_MAX_LEN))?
 								param->iov_max_len:
-								(IOV_DEFAULT_MAX_LEN);
+								get_option()->msg_iov_max_len;
 	server->msg_data_max_len = (param->opt.msg_data_max_len && 
 								param->opt.msg_data_max_len <= (4*1024*1024))?
 								param->opt.msg_data_max_len:
-								(DATA_DEFAULT_MAX_LEN);
-	server->msg_head_max_len = (param->opt.msg_head_max_len && param->opt.msg_head_max_len <= (1024))?
+								get_option()->msg_data_max_len;
+	server->msg_head_max_len = (param->opt.msg_head_max_len && param->opt.msg_head_max_len <= (2048))?
 								param->opt.msg_head_max_len:
-								(MAX_HEADER_DATA_LEN);
+								get_option()->msg_head_max_len;
 
 	ret = get_uri(&con_param, server->uri, URI_MAX_LEN);
 	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, error_1, "arpc_create_server fail");
@@ -149,6 +149,9 @@ int arpc_server_destroy(arpc_server_t *fd)
 	if (server->server_ctx) 
 		xio_context_destroy(server->server_ctx);
 	server->server_ctx = NULL;
+	if (server->server)
+		xio_unbind(server->server);
+	server->server = NULL;
 
 	if (server)
 		arpc_destroy_server(server);
@@ -345,7 +348,6 @@ static int server_on_new_session(struct xio_session *session,struct xio_new_sess
 	new_session->msg_data_max_len = (new_req.max_data_len)?new_req.max_data_len:server_fd->msg_data_max_len;
 	new_session->msg_head_max_len = (new_req.max_head_len)?new_req.max_head_len:server_fd->msg_head_max_len;
 	new_session->msg_iov_max_len = (new_req.max_iov_len)?new_req.max_iov_len:server_fd->msg_iov_max_len;
-
 	attr.ses_ops = NULL;
 	attr.uri = NULL;
 	attr.user_context = (void*)new_session;
@@ -438,7 +440,7 @@ int arpc_destroy_server(struct arpc_server_handle* svr)
 
 	ret = arpc_mutex_destroy(&svr->lock); /* 初始化互斥锁 */
 	LOG_THEN_RETURN_VAL_IF_TRUE(ret, -1, "arpc_mutex_destroy fail.");
-
+	
 	SAFE_FREE_MEM(svr);
 	return 0;
 }

@@ -75,16 +75,16 @@ arpc_session_handle_t arpc_client_create_session(const struct arpc_client_sessio
 	client_ctx->xio_param.uri			= client_ctx->uri;
 	client_ctx->xio_param.initial_sn	= 1;
 
-	session->msg_iov_max_len  = (param->opt.msg_iov_max_len && param->opt.msg_iov_max_len <= (4*1024))?
+	session->msg_iov_max_len  = (param->opt.msg_iov_max_len && param->opt.msg_iov_max_len <= (DATA_DEFAULT_MAX_LEN))?
 								param->opt.msg_iov_max_len:
-								(IOV_DEFAULT_MAX_LEN);
+								get_option()->msg_iov_max_len;
 	session->msg_data_max_len = (param->opt.msg_data_max_len && 
 								param->opt.msg_data_max_len <= (4*1024*1024))?
 								param->opt.msg_data_max_len:
-								(DATA_DEFAULT_MAX_LEN);
-	session->msg_head_max_len = (param->opt.msg_head_max_len && param->opt.msg_head_max_len <= (1024))?
+								get_option()->msg_data_max_len;
+	session->msg_head_max_len = (param->opt.msg_head_max_len && param->opt.msg_head_max_len <= (2048))?
 								param->opt.msg_head_max_len:
-								(MAX_HEADER_DATA_LEN);
+								get_option()->msg_head_max_len;
 
 	req_new.max_head_len = session->msg_head_max_len;
 	req_new.max_data_len = session->msg_data_max_len;

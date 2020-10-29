@@ -69,6 +69,9 @@ int process_rsp_data(struct xio_msg *rsp, int last_in_rxq, struct arpc_connectio
 
 	if (attr.rsp_crc && ex_msg->attr.req_crc && attr.rsp_crc != ex_msg->attr.req_crc) {
 		SET_FLAG(ex_msg->flags, XIO_MSG_ERROR_DISCARD_DATA);
+		ARPC_ASSERT(attr.rsp_crc == ex_msg->attr.req_crc, "request crc:0x%lx, but rsp it:0x%lx.", 
+						ex_msg->attr.req_crc,
+						attr.rsp_crc);
 		ARPC_LOG_ERROR("crc fail fail, request crc:0x%lx, but rsp it:0x%lx.",
 						ex_msg->attr.req_crc,
 						attr.rsp_crc);

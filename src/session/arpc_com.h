@@ -299,6 +299,8 @@ int arpc_uri_get_portal(const char *uri, char *portal, int portal_len);
 int arpc_uri_get_resource(const char *uri, char *resource, int resource_len);
 int arpc_uri_get_proto(const char *uri, char *proto, int proto_len);
 
+const struct aprc_option *get_option();
+
 void* arpc_get_threadpool();
 uint32_t arpc_thread_max_num();
 uint32_t arpc_cpu_max_num();

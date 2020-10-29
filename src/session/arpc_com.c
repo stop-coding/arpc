@@ -56,18 +56,31 @@ static int unpack_msg_head(uint8_t *rx_head, uint32_t rx_head_len, struct arpc_m
 
 static void set_user_option(const struct aprc_option *opt, struct aprc_option *out_opt)
 {
-	 out_opt->thread_max_num = (opt->thread_max_num && opt->thread_max_num < 256)?opt->thread_max_num:out_opt->thread_max_num;
-	 out_opt->cpu_max_num = (opt->cpu_max_num && opt->cpu_max_num < 256)?opt->cpu_max_num:out_opt->cpu_max_num;
-	 out_opt->msg_head_max_len = (opt->msg_head_max_len >= 128 && opt->msg_head_max_len <= 1024)?opt->msg_head_max_len:out_opt->msg_head_max_len;
-	 out_opt->msg_data_max_len = (opt->msg_data_max_len >= 1024 && opt->msg_data_max_len <= (4*1024*1024))?opt->msg_data_max_len:out_opt->msg_data_max_len;
-	 out_opt->msg_iov_max_len = (opt->msg_iov_max_len >= 1024 && opt->msg_iov_max_len <= (8*1024))?opt->msg_iov_max_len:out_opt->msg_iov_max_len;
-	 out_opt->tx_queue_max_depth = (opt->tx_queue_max_depth >= 128 && opt->tx_queue_max_depth <= (4*1024))?opt->tx_queue_max_depth:out_opt->tx_queue_max_depth;
-	 out_opt->tx_queue_max_size = (opt->tx_queue_max_size >= (8*1024*1024) && opt->tx_queue_max_size <= (1024*1024*1024))?opt->tx_queue_max_size:out_opt->tx_queue_max_size;
-	 out_opt->rx_queue_max_depth = (opt->rx_queue_max_depth >= 128 && opt->rx_queue_max_depth <= (4*1024))?opt->rx_queue_max_depth:out_opt->rx_queue_max_depth;
-	 out_opt->rx_queue_max_size = (opt->rx_queue_max_size >= (8*1024*1024) && opt->rx_queue_max_size <= (1024*1024*1024))?opt->rx_queue_max_size:out_opt->rx_queue_max_size;
+	 out_opt->thread_max_num = (opt->thread_max_num && opt->thread_max_num < 256)?
+	 							opt->thread_max_num:out_opt->thread_max_num;
+	 out_opt->cpu_max_num = (opt->cpu_max_num && opt->cpu_max_num < 256)?
+	 						opt->cpu_max_num:out_opt->cpu_max_num;
+	 out_opt->msg_head_max_len = (opt->msg_head_max_len >= 128 && opt->msg_head_max_len <= 2048)?
+	 							opt->msg_head_max_len:out_opt->msg_head_max_len;
+	 out_opt->msg_data_max_len = (opt->msg_data_max_len >= 1024 && opt->msg_data_max_len <= (4*1024*1024))?
+	 							opt->msg_data_max_len:out_opt->msg_data_max_len;
+	 out_opt->msg_iov_max_len = (opt->msg_iov_max_len >= 1024 && opt->msg_iov_max_len <= (out_opt->msg_data_max_len))?
+	 							opt->msg_iov_max_len:out_opt->msg_iov_max_len;
+	 out_opt->tx_queue_max_depth = (opt->tx_queue_max_depth >= 128 && opt->tx_queue_max_depth <= (4*1024))?
+	 							opt->tx_queue_max_depth:out_opt->tx_queue_max_depth;
+	 out_opt->tx_queue_max_size = (opt->tx_queue_max_size >= (8*1024*1024) && opt->tx_queue_max_size <= (1024*1024*1024))?
+	 							opt->tx_queue_max_size:out_opt->tx_queue_max_size;
+	 out_opt->rx_queue_max_depth = (opt->rx_queue_max_depth >= 128 && opt->rx_queue_max_depth <= (4*1024))?
+	 							opt->rx_queue_max_depth:out_opt->rx_queue_max_depth;
+	 out_opt->rx_queue_max_size = (opt->rx_queue_max_size >= (8*1024*1024) && opt->rx_queue_max_size <= (1024*1024*1024))?
+	 							opt->rx_queue_max_size:out_opt->rx_queue_max_size;
 	 out_opt->control = opt->control;
 }
 
+const struct aprc_option *get_option()
+{
+	return &g_param.opt;
+}
 static void set_xio_option(const struct aprc_option *opt)
 {
 	uint32_t val = 0;
@@ -483,8 +496,8 @@ int move_msg_xio2arpc(struct xio_vmsg *xio_msg, struct arpc_vmsg *msg, struct ar
 			crc = arpc_cal_crc64(crc, (const unsigned char *)msg->vec[i].data, msg->vec[i].len);
 			sglist[i].iov_base = NULL;
 			sglist[i].iov_len = 0; 
-			assert(msg->vec[i].data);
-			assert(msg->vec[i].len);
+			ARPC_ASSERT(msg->vec[i].data, "vec[%u].data null, but nents:%u", i, nents);
+			ARPC_ASSERT(msg->vec[i].len, "vec[%u].len 0, but nents:%u", i, nents);
 		}
 		msg->vec_num = nents;
 		vmsg_sglist_set_nents(xio_msg, 0);
@@ -502,7 +515,9 @@ int move_msg_xio2arpc(struct xio_vmsg *xio_msg, struct arpc_vmsg *msg, struct ar
 	ARPC_LOG_DEBUG("rx crc:0x%lx, cal crc:0x%lx", proto.req_crc, crc);
 	if (crc && proto.req_crc){
 		// 确保两边都开启crc才有意义,0 默认不开启
-		ARPC_ASSERT(proto.req_crc == crc, "crc check fail.");
+		ARPC_ASSERT(proto.req_crc == crc, "crc check fail, rx crc:0x%lx, but cal crc:0x%lx.",
+											proto.req_crc,
+											crc);
 		LOG_THEN_GOTO_TAG_IF_VAL_TRUE((proto.req_crc != crc), fail_out, 
 									"crc check fail, rx crc:0x%lx, but cal crc:0x%lx.", 
 									proto.req_crc, 

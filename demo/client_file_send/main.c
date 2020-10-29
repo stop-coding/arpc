@@ -243,7 +243,7 @@ int session_send_msg(arpc_session_handle_t session_fd)
 
 		// do request
 
-		/*ret = arpc_do_request(session_fd, request, 5*1000);
+		ret = arpc_do_request(session_fd, request, 5*1000);
 		if (!ret){
 			for (i = 0; i < request->send.vec_num; i++) {
 				if (request->send.vec[i].data){
@@ -256,7 +256,7 @@ int session_send_msg(arpc_session_handle_t session_fd)
 		}
 		free(request->send.vec);
 		request->send.vec = NULL;
-		arpc_reset_msg(request);*/
+		arpc_reset_msg(request);
 	}
 	arpc_delete_msg(&request);
 	if(fp)
@@ -314,7 +314,7 @@ int main(int argc, char *argv[])
 	g_filepath = argv[3];
 
 	SET_FLAG(opt.control, ARPC_E_CTRL_CRC); //开启通信CRC检查
-
+	opt.msg_iov_max_len = 8*1024;
 	arpc_init_r(&opt);
 	// 创建session
 	memset(&param, 0, sizeof(param));
