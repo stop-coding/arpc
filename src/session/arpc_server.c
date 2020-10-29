@@ -332,6 +332,16 @@ static int server_on_new_session(struct xio_session *session,struct xio_new_sess
 	new_session_ctx = (struct arpc_new_session_ctx *)new_session->ex_ctx;
 	new_session_ctx->server = server_fd;
 	
+	if (param.ops_new_ctx)
+		new_session->usr_context = param.ops_new_ctx;
+	else
+		new_session->usr_context = server_fd->usr_context;
+	
+	if (param.ops) {
+		new_session->ops = *(param.ops);
+	}else{
+		new_session->ops = server_fd->ops;
+	}
 	new_session->msg_data_max_len = (new_req.max_data_len)?new_req.max_data_len:server_fd->msg_data_max_len;
 	new_session->msg_head_max_len = (new_req.max_head_len)?new_req.max_head_len:server_fd->msg_head_max_len;
 	new_session->msg_iov_max_len = (new_req.max_iov_len)?new_req.max_iov_len:server_fd->msg_iov_max_len;
@@ -374,16 +384,7 @@ static int server_on_new_session(struct xio_session *session,struct xio_new_sess
 	ret = server_insert_session(server_fd, new_session);
 	LOG_ERROR_IF_VAL_TRUE(ret, "server_insert_session fail.");
 	server_fd->new_session_end((arpc_session_handle_t)new_session, &param, server_fd->usr_context);
-	if (param.ops_new_ctx)
-		new_session->usr_context = param.ops_new_ctx;
-	else
-		new_session->usr_context = server_fd->usr_context;
 	
-	if (param.ops) {
-		new_session->ops = *(param.ops);
-	}else{
-		new_session->ops = server_fd->ops;
-	}
 	ARPC_LOG_NOTICE("create new session[%p] success, client[%s:%u].", server_fd, ipv4->ipv4.ip, ipv4->ipv4.port);
 	return 0;
 reject:

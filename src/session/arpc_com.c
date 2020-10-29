@@ -52,7 +52,7 @@ static struct aprc_paramter g_param= {
 	
 };
 
-static const char SERVER_DEFAULT[] = "rsp-header:undefine";
+static int unpack_msg_head(uint8_t *rx_head, uint32_t rx_head_len, struct arpc_msg_attr *attr, void **usr_head, uint32_t *usr_head_len);
 
 static void set_user_option(const struct aprc_option *opt, struct aprc_option *out_opt)
 {
@@ -287,18 +287,25 @@ int create_xio_msg_usr_buf(struct xio_msg *msg, struct proc_header_func *ops, ui
 	uint32_t i;
 	int ret;
 	uint64_t last_size;
+	void *usr_addr = NULL;
+	struct arpc_msg_attr proto = {0};
 
 	msg->in.sgl_type = XIO_SGL_TYPE_IOV;
 	LOG_THEN_RETURN_VAL_IF_TRUE((!msg->in.header.iov_base || !msg->in.header.iov_len), -1, "header null.");
 	LOG_THEN_RETURN_VAL_IF_TRUE((!msg->in.header.iov_len), -1, "header len is 0.");
 
-	memset(&header, 0, sizeof(struct arpc_header_msg));
-	header.head = msg->in.header.iov_base;
-	header.head_len = msg->in.header.iov_len;
-	header.data_len = msg->in.total_data_len;
-	// header process
 	msg->usr_flags = 0;
 	if(ops->proc_head_cb){
+		memset(&header, 0, sizeof(struct arpc_header_msg));
+		header.head_len = msg->in.header.iov_len;
+		header.data_len = msg->in.total_data_len;
+		ret = unpack_msg_head((uint8_t *)msg->in.header.iov_base, msg->in.header.iov_len, &proto, &usr_addr, &header.head_len);
+		if (usr_addr && !ret){
+			header.head = usr_addr;
+		}else{
+			header.head = msg->in.header.iov_base;
+			header.head_len = msg->in.header.iov_len;
+		}
 		ret = ops->proc_head_cb(&header, usr_ctx, &flag);
 		if (ret != ARPC_SUCCESS){
 			ARPC_LOG_DEBUG("discard data, total_data_len[%lu].", msg->in.total_data_len);
