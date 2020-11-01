@@ -158,7 +158,7 @@ static struct arpc_session_ops ops ={
 };
 
 static const char *g_filepath = NULL;
-
+static uint64_t g_file_size = 0;
 int session_send_msg(arpc_session_handle_t session_fd)
 {
 	uint32_t				i = 0;
@@ -171,6 +171,8 @@ int session_send_msg(arpc_session_handle_t session_fd)
 	BYTE buf[SHA256_BLOCK_SIZE];
 	BYTE buf_str[SHA256_BLOCK_SIZE*2 +1];
 	SHA256_CTX ctx;
+	struct timeval start_now;
+	struct timeval end_now;
 
 	file_path = g_filepath;
 	fp = fopen(file_path, "rb");
@@ -180,9 +182,11 @@ int session_send_msg(arpc_session_handle_t session_fd)
     }
 	fseek(fp, 0, SEEK_END);
 	file_len = ftell(fp);
+	g_file_size = file_len;
 	rewind(fp);
 	printf("-----file_size:%lu\n", file_len);
 
+	gettimeofday(&start_now, NULL);	//
 	// 新建消息
 	request = arpc_new_msg(NULL);
 
@@ -232,7 +236,7 @@ int session_send_msg(arpc_session_handle_t session_fd)
 			printf("arpc_send_oneway_msg fail\n");
 		}
 		// oneway
-		ret = arpc_cond_wait_timeout(&g_cond, 3000);
+		ret = arpc_cond_wait_timeout(&g_cond, 30*1000);
 		arpc_cond_unlock(&g_cond);
 
 		if(strncmp((char*)g_buf_str, (char*)buf_str, SHA256_BLOCK_SIZE*2) != 0){
@@ -243,7 +247,7 @@ int session_send_msg(arpc_session_handle_t session_fd)
 
 		// do request
 
-		ret = arpc_do_request(session_fd, request, 5*1000);
+		ret = arpc_do_request(session_fd, request, 30*1000);
 		if (!ret){
 			for (i = 0; i < request->send.vec_num; i++) {
 				if (request->send.vec[i].data){
@@ -258,14 +262,19 @@ int session_send_msg(arpc_session_handle_t session_fd)
 		request->send.vec = NULL;
 		arpc_reset_msg(request);
 	}
+	gettimeofday(&end_now, NULL);	//
 	arpc_delete_msg(&request);
 	if(fp)
 		fclose(fp);
+	end_now.tv_sec = end_now.tv_sec - start_now.tv_sec;
+	end_now.tv_usec = (end_now.tv_usec >= start_now.tv_sec)?(end_now.tv_usec - start_now.tv_sec):
+						(end_now.tv_usec +(1000*1000- start_now.tv_usec));
+	printf("\n\nWARING:------ send times:[%lu.%lu s]--------.\n\n", end_now.tv_sec, end_now.tv_usec);
 	return 0;
 }
 
-#define MAX_THREADS 	16
-#define MAX_LOOP_TIMES 	96000
+#define MAX_THREADS 	1
+#define MAX_LOOP_TIMES 	100
 
 static void *worker_thread(void *data)
 {
@@ -302,6 +311,8 @@ int main(int argc, char *argv[])
 	BYTE buf_str[SHA256_BLOCK_SIZE*2 +1];
 	SHA256_CTX ctx;
 	struct aprc_option opt = {0};
+	struct timeval start_now;
+	struct timeval end_now;
 
 	if (argc < 5) {
 		printf("Usage: %s <host> <port> <file path> <req data>. \n", argv[0]);
@@ -313,6 +324,7 @@ int main(int argc, char *argv[])
 	
 	g_filepath = argv[3];
 
+	gettimeofday(&start_now, NULL);	//
 	SET_FLAG(opt.control, ARPC_E_CTRL_CRC); //开启通信CRC检查
 	opt.msg_iov_max_len = 8*1024;
 	arpc_init_r(&opt);
@@ -331,7 +343,7 @@ int main(int argc, char *argv[])
 		printf("arpc_client_create_session fail\n");
 		goto end;
 	}
-	arpc_sleep(3);
+	arpc_sleep(1);
 	for (i = 0; i < MAX_THREADS; i++) {
 		pthread_create(&g_thread_id[i], NULL, worker_thread, session_fd);
 	}
@@ -339,7 +351,13 @@ int main(int argc, char *argv[])
 	/* join the threads */
 	for (i = 0; i < MAX_THREADS; i++)
 		pthread_join(g_thread_id[i], NULL);
-
+	gettimeofday(&end_now, NULL);	//
+	g_file_size = g_file_size*MAX_LOOP_TIMES*MAX_THREADS;
+	printf("\n\n################################################\n");
+	printf("##### task test end for targe[%s:%s] \n", argv[1], argv[2]);
+	printf("##### send total szie:[%lu KB/s] .\n", g_file_size/1024);
+	printf("##### send total times:[%lu.%lu s] .\n\n", (end_now.tv_sec - start_now.tv_sec), end_now.tv_usec);
+	printf("\n\n################################################\n");
 	arpc_client_destroy_session(&session_fd);
 	printf("file send complete:%s.\n\n", g_filepath);
 end:

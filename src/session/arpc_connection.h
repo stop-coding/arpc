@@ -74,6 +74,7 @@ int arpc_client_connect(struct arpc_connection *con, int64_t timeout_s);
 int arpc_client_wait_connected(struct arpc_connection *con, int64_t timeout_ms);
 int arpc_client_disconnect(struct arpc_connection *con, int64_t timeout_s);
 
+int arpc_client_conn_stop_loop_r(struct arpc_connection *con);
 int arpc_client_conn_stop_loop(struct arpc_connection *con);
 int arpc_client_reconnect(struct arpc_connection *con);
 

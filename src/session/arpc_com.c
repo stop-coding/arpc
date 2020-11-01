@@ -625,9 +625,11 @@ void free_msg_arpc2xio(struct xio_vmsg *xio_msg)
 	struct xio_msg 	*req = NULL;
 	if ((xio_msg->pad) && xio_msg->pdata_iov.sglist){
 		SAFE_FREE_MEM(xio_msg->pdata_iov.sglist);
+		vmsg_sglist_set_nents(xio_msg, 0);
 		xio_msg->pad = 0;
 	}
 	SAFE_FREE_MEM(xio_msg->header.iov_base);
+	xio_msg->header.iov_len = 0;
 	return;
 }
 

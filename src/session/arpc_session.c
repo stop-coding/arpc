@@ -108,7 +108,6 @@ int arpc_destroy_session(struct arpc_session_handle* session, int64_t timeout_ms
 		QUEUE_REMOVE(iter);
 		QUEUE_INIT(iter);
 		arpc_unlock_connection(con);
-
 		ret = arpc_destroy_connection(con);
 		LOG_ERROR_IF_VAL_TRUE(ret, "arpc_destroy_connection fail.");
 	}
@@ -182,19 +181,22 @@ int session_notify_wakeup(struct arpc_session_handle *session)
 	return 0;
 }
 
-// 外部session已加锁
-static int session_rebuild_for_client(struct arpc_session_handle *session)
+static int task_rebuild_for_client(void *thread_ctx)
 {
+	struct arpc_session_handle *session = (struct arpc_session_handle *)thread_ctx;
 	struct arpc_client_ctx *client_ctx;
 	int ret;
 	QUEUE* iter;
 	struct arpc_connection *con = NULL;
 
+	ret = arpc_cond_lock(&session->cond);
+	LOG_THEN_RETURN_VAL_IF_TRUE(ret, ARPC_ERROR, "arpc_mutex_lock session[%p] fail.", session);
+
 	if (session->reconnect_times > ARPC_SESSION_RECONNECT_FAIL_MAX_TIME) {
 		session->status = ARPC_SES_STA_SLEEP;
 		ARPC_LOG_NOTICE("session[%p] sleep wait next try time", session);
 		arpc_cond_wait_timeout(&session->cond, ARPC_SESSION_RECONNECT_WAIT_TIME_S*1000);
-		LOG_THEN_RETURN_VAL_IF_TRUE(session->is_close, ARPC_ERROR, "session have been closed.");
+		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(session->is_close, unlock, "session have been closed.");
 	}else{
 		session->reconnect_times++;
 	}
@@ -202,7 +204,7 @@ static int session_rebuild_for_client(struct arpc_session_handle *session)
 	session->status = ARPC_SES_STA_REBUILD;
 	ARPC_LOG_NOTICE("try rebuild session[%p]..., retry times[%u]", session, session->reconnect_times);
 	session->xio_s = xio_session_create(&client_ctx->xio_param);
-	LOG_THEN_RETURN_VAL_IF_TRUE(!session->xio_s, ARPC_ERROR, "xio_session_create fail.");
+	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!session->xio_s, unlock, "rebuild xio_session_create fail.");
 
 	QUEUE_FOREACH_VAL(&session->q_con, iter,
 	{
@@ -211,8 +213,28 @@ static int session_rebuild_for_client(struct arpc_session_handle *session)
 		LOG_ERROR_IF_VAL_TRUE(ret, "arpc_client_reconnect fail.");
 	});
 
+	arpc_cond_unlock(&session->cond);
+	return 0;
+unlock:
+	arpc_cond_unlock(&session->cond);
+	return ARPC_ERROR;
+}
+
+// 外部session已加锁,异步重建
+int session_rebuild_for_client(struct arpc_session_handle *session)
+{
+	work_handle_t 	thread_handle;
+	struct tp_thread_work thread;
+
+	thread.loop = &task_rebuild_for_client;
+	thread.stop = NULL;
+	thread.usr_ctx = (void*)session;
+
+	thread_handle = tp_post_one_work(arpc_get_threadpool(), &thread, WORK_DONE_AUTO_FREE);
+	LOG_THEN_RETURN_VAL_IF_TRUE(!thread_handle, ARPC_ERROR, "tp_post_one_work fail.");
 	return 0;
 }
+
 
 // 外部session已加锁
 static int session_cleanup_for_client(struct arpc_session_handle *session)
@@ -366,7 +388,8 @@ int session_async_send(struct arpc_session_handle *session, struct arpc_common_m
 
 	ret = arpc_cond_lock(&session->cond);
 	LOG_THEN_RETURN_VAL_IF_TRUE(ret, ARPC_ERROR, "arpc_mutex_lock session[%p] fail.", session);
-	if (session->type == ARPC_SESSION_CLIENT && session->status != ARPC_SES_STA_ACTIVE) {
+	if (session->type == ARPC_SESSION_CLIENT && session->status == ARPC_SES_STA_CLOSE
+		&& IS_SET(session->flags, ARPC_SESSION_ATTR_AUTO_DISCONNECT)) {
 		ret = session_client_connect(session, timeout_ms);
 		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, unlock,"session_client_connect fail");
 	}

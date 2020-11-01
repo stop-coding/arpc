@@ -27,7 +27,7 @@
 #include "arpc_xio_callback.h"
 #include "arpc_proto.h"
 
-#define CLIENT_DESTROY_SESSION_MAX_TIME (30*1000)
+#define CLIENT_DESTROY_SESSION_MAX_TIME (3*1000)
 
 #define ARPC_CLIENT_LOOP_MIN_TIME_MS    (100)
 

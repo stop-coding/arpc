@@ -49,6 +49,8 @@ int arpc_do_request(const arpc_session_handle_t fd, struct arpc_msg *msg, int32_
 	LOG_THEN_RETURN_VAL_IF_TRUE(!req_msg, ARPC_ERROR,"arpc_create_common_msg");
 	req_fd = (struct arpc_request_handle*)req_msg->ex_data;
 
+	ARPC_LOG_DEBUG("new msg:%p.", req_msg);//
+
 	req_fd->msg = msg;
 	req_fd->msg_ex = (struct arpc_msg_ex *)msg->handle;
 
@@ -169,6 +171,9 @@ int arpc_send_oneway_msg(const arpc_session_handle_t fd, struct arpc_vmsg *send,
 
 	req_msg = arpc_create_common_msg(sizeof(struct arpc_oneway_handle));
 	LOG_THEN_RETURN_VAL_IF_TRUE(!req_msg, ARPC_ERROR,"arpc_create_common_msg");
+
+	ARPC_LOG_DEBUG("new msg:%p.", req_msg);//
+
 	ow_msg = (struct arpc_oneway_handle*)req_msg->ex_data;
 	ow_msg->send = send;
 	ow_msg->clean_send_cb = clean_send;
@@ -199,10 +204,14 @@ int arpc_send_oneway_msg(const arpc_session_handle_t fd, struct arpc_vmsg *send,
 
 	if (!ow_msg->clean_send_cb){
 		ret = arpc_cond_wait_timeout(&req_msg->cond, SEND_ONEWAY_END_MAX_TIME); // 默认等待
-		LOG_ERROR_IF_VAL_TRUE(ret, "wait oneway msg send complete timeout fail.");
 		arpc_cond_unlock(&req_msg->cond);
-		free_msg_arpc2xio(&req->out);
-		arpc_destroy_common_msg(req_msg);	//un lock
+		if (!ret){
+			free_msg_arpc2xio(&req->out);
+			arpc_destroy_common_msg(req_msg);	//un lock
+		}else{
+			free_msg_arpc2xio(&req->out);
+			ARPC_LOG_ERROR("wait oneway msg send complete timeout fail, msg keep."); // TODO 释放超时的资源
+		}
 	}else{
 		arpc_cond_unlock(&req_msg->cond);
 	}
