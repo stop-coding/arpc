@@ -97,6 +97,7 @@ int arpc_do_request(const arpc_session_handle_t fd, struct arpc_msg *msg, int32_
 			ARPC_LOG_ERROR("wait msg rx respone of request fail.");// todo 内存回收
 			ex_msg->x_rsp_msg = NULL;
 			MSG_CLR_REQ(ex_msg->flags);
+			SET_FLAG(req_msg->flag, XIO_MSG_ERROR_DISCARD_DATA);
 			arpc_cond_unlock(&req_msg->cond);
 			return (-ETIMEDOUT);
 		}
