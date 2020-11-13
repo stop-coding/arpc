@@ -44,6 +44,7 @@ extern "C" {
 #define ARPC_LOG_ERROR(format, arg...) BASE_LOG_ERROR(format, ##arg)
 #define ARPC_LOG_NOTICE(format, arg...) BASE_LOG_NOTICE(format, ##arg)
 #define ARPC_LOG_DEBUG(format, arg...) 	BASE_LOG_DEBUG(format,  ##arg)
+#define ARPC_LOG_TRACE(format, arg...) 	BASE_LOG_TRACE(format,  ##arg)
 
 #define ARPC_ASSERT(condition, format, arg...) BASE_ASSERT(condition, format, ##arg)
 
@@ -260,27 +261,54 @@ struct arpc_thread_param{
 
 #define ARPC_COM_MSG_MAGIC 0xfa577
 enum  arpc_msg_type{
-	ARPC_MSG_TYPE_REQ,
+	ARPC_MSG_TYPE_REQ = 0,
 	ARPC_MSG_TYPE_RSP,
 	ARPC_MSG_TYPE_OW,
+};
+
+enum  arpc_msg_status{
+	ARPC_MSG_STATUS_IDLE = 0,
+	ARPC_MSG_STATUS_USED,
+	ARPC_MSG_STATUS_TX,
+	ARPC_MSG_STATUS_FREE,
 };
 
 struct arpc_common_msg {
 	QUEUE 						q;
 	uint32_t					magic;
-	int							ref;
 	enum	arpc_msg_type		type;
 	struct arpc_cond 			cond;				
-	struct arpc_connection		*conn;
+	const struct arpc_connection*conn;
 	struct xio_msg				*tx_msg;
 	uint32_t 					retry_cnt;
     uint32_t                    flag;
+	enum  arpc_msg_status		status;
 	void 		                *usr_context;				/*! @brief 用户上下文 */
     char                        ex_data[0];
 };
 
-struct arpc_common_msg *arpc_create_common_msg(uint32_t ex_data_size);
-int arpc_destroy_common_msg(struct arpc_common_msg *msg);
+struct arpc_oneway_handle {
+	struct xio_msg				x_req_msg;
+    struct arpc_vmsg	        *send;
+	void 				        *send_ctx;
+	struct arpc_msg_attr        attr;
+	int (*clean_send_cb)(struct arpc_vmsg *send, void* send_ctx);
+};
+
+struct arpc_request_handle {
+	struct arpc_msg *msg;
+    struct arpc_msg_ex *msg_ex;
+};
+
+struct arpc_rsp_handle {
+	struct xio_msg				x_req_msg;
+    struct xio_msg				*x_rsp_msg;
+	struct arpc_vmsg 			*rsp_usr_iov;
+	struct arpc_msg_attr		attr;
+	int (*release_rsp_cb)(struct arpc_vmsg *rsp_iov, void* rsp_usr_ctx);
+	void *rsp_usr_ctx;
+};
+
 
 // base
 inline static void *arpc_mem_alloc(size_t size, void *mem_ctx){

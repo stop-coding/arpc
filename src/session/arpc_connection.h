@@ -90,10 +90,14 @@ int arpc_unlock_connection(struct arpc_connection *con);
 
 int arpc_check_connection_valid(struct arpc_connection *conn);
 
-int arpc_connection_async_send(struct arpc_connection *conn, struct arpc_common_msg  *msg);
-int arpc_connection_send_comp_notify(struct arpc_connection *conn, struct arpc_common_msg *msg);
+int arpc_connection_async_send(const struct arpc_connection *conn, struct arpc_common_msg  *msg);
+int arpc_connection_send_comp_notify(const struct arpc_connection *conn, struct arpc_common_msg *msg);
 
 int check_xio_msg_valid(const struct arpc_connection *conn, const struct xio_vmsg *pmsg);
+
+struct arpc_common_msg *get_common_msg(const struct arpc_connection *conn, enum  arpc_msg_type type);
+void put_common_msg(struct arpc_common_msg *msg);
+
 #ifdef __cplusplus
 }
 #endif

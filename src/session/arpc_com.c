@@ -633,44 +633,6 @@ void free_msg_arpc2xio(struct xio_vmsg *xio_msg)
 	return;
 }
 
-struct arpc_common_msg *arpc_create_common_msg(uint32_t ex_data_size)
-{
-	struct arpc_common_msg *req_msg = NULL;
-	int ret;
-
-	req_msg = (struct arpc_common_msg*)arpc_mem_alloc(sizeof(struct arpc_common_msg) + ex_data_size,NULL);
-	LOG_THEN_RETURN_VAL_IF_TRUE(!req_msg, NULL, "arpc_mem_alloc arpc_msg fail.");
-	memset(req_msg, 0, sizeof(struct arpc_common_msg) + ex_data_size);
-	ret = arpc_cond_init(&req_msg->cond); 
-	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, error, "arpc_cond_init for new msg fail.");
-	req_msg->flag = 0;
-	QUEUE_INIT(&req_msg->q);
-	req_msg->magic = ARPC_COM_MSG_MAGIC;
-	req_msg->ref = 1;
-	return req_msg;
-error:
-	SAFE_FREE_MEM(req_msg);
-	return NULL;
-}
-
-
-int arpc_destroy_common_msg(struct arpc_common_msg *msg)
-{
-	int ret;
-	LOG_THEN_RETURN_VAL_IF_TRUE(!msg, ARPC_ERROR, "msg is null.");
-	ret = arpc_cond_lock(&msg->cond);
-	LOG_THEN_RETURN_VAL_IF_TRUE(ret, ARPC_ERROR, "arpc_cond_lock null.");
-	msg->ref--;
-	if(msg->ref > 0){
-		arpc_cond_unlock(&msg->cond);
-		return 0;
-	}
-	arpc_cond_unlock(&msg->cond);
-	arpc_cond_destroy(&msg->cond);
-	SAFE_FREE_MEM(msg);
-	return 0;
-}
-
 const char *arpc_uri_get_resource_ptr(const char *uri)
 {
 	const char *start;

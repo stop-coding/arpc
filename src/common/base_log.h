@@ -30,14 +30,26 @@ extern "C" {
 #define BASE_ERROR			-1
 #define BASE_SUCCESS		 0
 
+enum arpc_log_level{
+	ARPC_LOG_LEVEL_E_FATAL = 0,
+	ARPC_LOG_LEVEL_E_ERROR,
+	ARPC_LOG_LEVEL_E_WARN,
+	ARPC_LOG_LEVEL_E_INFO,
+	ARPC_LOG_LEVEL_E_DEBUG,
+	ARPC_LOG_LEVEL_E_TRACE,
+	ARPC_LOG_LEVEL_E_MAX,
+};
+void arpc_vlog(enum arpc_log_level level, const char *module, const char *file,unsigned line, const char *function, const char *fmt, ...);
+
 //#define BASE_DEBUG_ON
 #define BASE_LOG_ERROR(format, arg...) \
-		syslog(LOG_ERR, 	"[ ARPC] [ ERROR] [%lu] file:%s func: %s|%d---"format"\n", pthread_self(),__FILE__, __FUNCTION__, __LINE__,##arg);\
-		fprintf(stderr, 	"[ ARPC] [ ERROR] file:%s func: %s|%d---"format"\n", __FILE__, __FUNCTION__, __LINE__,##arg);
+		arpc_vlog(ARPC_LOG_LEVEL_E_ERROR, "ARPC", __FILE__, __LINE__, __FUNCTION__, format, ##arg);
 
 #define BASE_LOG_NOTICE(format, arg...) \
-		syslog(LOG_NOTICE, "[ ARPC] [NOTICE] func: %s|%d---"format"\n",__FUNCTION__, __LINE__, ##arg);\
-		fprintf(stderr, "[ ARPC] [NOTICE] func: %s|%d---"format"\n",__FUNCTION__, __LINE__, ##arg);
+		arpc_vlog(ARPC_LOG_LEVEL_E_INFO, "ARPC", __FILE__, __LINE__, __FUNCTION__, format, ##arg);
+
+#define BASE_LOG_TRACE(format, arg...)
+		//arpc_vlog(ARPC_LOG_LEVEL_E_TRACE, "ARPC", __FILE__, __LINE__, __FUNCTION__, format, ##arg);
 
 //#define BASE_LOG_NOTICE(format, arg...)
 //#define BASE_LOG_ERROR(format, arg...) fprintf(stderr, 	"[ ARPC] [ ERROR] file:%s func: %s|%d---"format"\n", __FILE__, __FUNCTION__, __LINE__,##arg)
@@ -45,8 +57,7 @@ extern "C" {
 
 #ifdef BASE_DEBUG_ON
 #define BASE_LOG_DEBUG(format, arg...) \
-		syslog(LOG_ERR, "[ ARPC] [ DEBUG] func: %s|%d---"format"\n",__FUNCTION__, __LINE__, ##arg);\
-		fprintf(stderr, "[ ARPC] [DEBUG] func: %s|%d---"format"\n",__FUNCTION__, __LINE__, ##arg);
+		arpc_vlog(ARPC_LOG_LEVEL_E_DEBUG, "ARPC", __FILE__, __LINE__, __FUNCTION__, format, ##arg);
 #else
 #define BASE_LOG_DEBUG(format, arg...)
 #endif
@@ -91,6 +102,7 @@ do{\
 		BASE_LOG_ERROR(format,##arg);\
 	}\
 }while(0);
+
 
 #ifdef __cplusplus
 }

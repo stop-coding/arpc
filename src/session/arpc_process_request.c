@@ -60,10 +60,8 @@ int process_request_data(struct arpc_connection *con, struct xio_msg *req, struc
 	ret = destroy_xio_msg_usr_buf(req, ops->free_cb, usr_ctx);
 	LOG_THEN_RETURN_VAL_IF_TRUE((ret), ARPC_ERROR, "destroy_xio_msg_usr_buf fail.");
 
-	rsp_hanlde = arpc_create_common_msg(sizeof(struct arpc_rsp_handle));
+	rsp_hanlde = get_common_msg(con, ARPC_MSG_TYPE_RSP);
 	LOG_THEN_RETURN_VAL_IF_TRUE(!rsp_hanlde, ARPC_ERROR, "rsp_hanlde alloc null.");
-	rsp_hanlde->type = ARPC_MSG_TYPE_RSP;
-	rsp_hanlde->conn = con;
 	rsp_fd_ex = (struct arpc_rsp_handle*)rsp_hanlde->ex_data;
 	rsp_fd_ex->x_rsp_msg = req;//保存回复的结构体
 	rsp_fd_ex->attr.rsp_crc = attr.req_crc;//请求保存在回复体里

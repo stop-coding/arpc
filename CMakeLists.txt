@@ -89,3 +89,5 @@ INSTALL(TARGETS arpc LIBRARY DESTINATION ${LINK_LIB_PATH})
 #子项目
 add_subdirectory("${ARPC_DEMO_PATH}/client_file_send")
 add_subdirectory("${ARPC_DEMO_PATH}/server_file_rev")
+add_subdirectory("${ARPC_DEMO_PATH}/arpc_client_test")
+add_subdirectory("${ARPC_DEMO_PATH}/arpc_server_test")

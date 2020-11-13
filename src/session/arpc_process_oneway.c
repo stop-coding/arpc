@@ -36,6 +36,7 @@ int process_oneway_header(struct xio_msg *msg, struct oneway_ops *ops, uint64_t 
 	head_ops.alloc_cb = ops->alloc_cb;
 	head_ops.free_cb = ops->free_cb;
 	head_ops.proc_head_cb = ops->proc_head_cb;
+
 	return create_xio_msg_usr_buf(msg, &head_ops, iov_max_len, usr_ctx);
 }
 
@@ -63,7 +64,6 @@ int process_oneway_data(struct xio_msg *req, struct oneway_ops *ops, int last_in
 
 	ret = destroy_xio_msg_usr_buf(req, ops->free_cb, usr_ctx);
 	LOG_THEN_RETURN_VAL_IF_TRUE((ret), ARPC_ERROR, "destroy_xio_msg_usr_buf fail.");
-
 	if (IS_SET(req->usr_flags, METHOD_ARPC_PROC_SYNC) && ops->proc_data_cb) {
 		ARPC_LOG_DEBUG("set sync proc_data_cb data.");
 		ret = ops->proc_data_cb(&rev_iov, &flags, usr_ctx);
@@ -126,6 +126,5 @@ static int oneway_msg_async_deal(void *usr_ctx)
 	// free
 	SAFE_FREE_MEM(async->rev_iov.head);
 	SAFE_FREE_MEM(async);
-
 	return 0;
 }

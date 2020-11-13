@@ -32,19 +32,6 @@
 extern "C" {
 #endif
 
-struct arpc_oneway_handle {
-	struct xio_msg				x_req_msg;
-    struct arpc_vmsg	        *send;
-	void 				        *send_ctx;
-	struct arpc_msg_attr        attr;
-	int (*clean_send_cb)(struct arpc_vmsg *send, void* send_ctx);
-};
-
-struct arpc_request_handle {
-	struct arpc_msg *msg;
-    struct arpc_msg_ex *msg_ex;
-};
-
 #define REQUEST_CTX(_usr_msg, _usr_msg_ex, _com_msg)\
 struct arpc_msg_ex *_usr_msg_ex;\
 struct arpc_msg *_usr_msg;\

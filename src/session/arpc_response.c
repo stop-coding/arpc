@@ -124,7 +124,7 @@ int arpc_send_response_complete(struct arpc_common_msg *rsp_fd)
 		free_msg_arpc2xio(&rsp_msg->out);
 	}
 	ret = arpc_cond_unlock(&rsp_fd->cond);
-	arpc_destroy_common_msg(rsp_fd);
+	put_common_msg(rsp_fd);
 
 	return 0;
 }

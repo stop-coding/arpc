@@ -89,6 +89,7 @@ int session_remove_con(struct arpc_session_handle *s, struct arpc_connection *co
 int session_move_con_tail(struct arpc_session_handle *s, struct arpc_connection *con);
 
 int session_async_send(struct arpc_session_handle *session, struct arpc_common_msg  *msg, int64_t timeout_ms);
+int session_get_idle_conn(struct arpc_session_handle *session, struct arpc_connection **conn, int64_t timeout_ms);
 
 #ifdef __cplusplus
 }

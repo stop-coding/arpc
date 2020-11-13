@@ -40,16 +40,19 @@ int arpc_do_request(const arpc_session_handle_t fd, struct arpc_msg *msg, int32_
 	struct arpc_common_msg *req_msg = NULL;
 	struct arpc_msg *rev_msg;
 	uint32_t send_cnt;
+	struct arpc_connection *con = NULL;
 	struct arpc_msg_ex *ex_msg;
 	struct arpc_request_handle *req_fd;
 
 	LOG_THEN_RETURN_VAL_IF_TRUE((!session_ctx || !msg ), ARPC_ERROR, "arpc_session_handle_t fd null, exit.");
 
-	req_msg = arpc_create_common_msg(sizeof(struct arpc_request_handle));
-	LOG_THEN_RETURN_VAL_IF_TRUE(!req_msg, ARPC_ERROR,"arpc_create_common_msg");
-	req_fd = (struct arpc_request_handle*)req_msg->ex_data;
+	ret = session_get_idle_conn(session_ctx, &con, timeout_ms);
+	LOG_THEN_RETURN_VAL_IF_TRUE(!con, ARPC_ERROR,"session_get_idle_conn fail");
 
-	ARPC_LOG_DEBUG("new msg:%p.", req_msg);//
+	req_msg = get_common_msg(con, ARPC_MSG_TYPE_REQ);
+	LOG_THEN_RETURN_VAL_IF_TRUE(!req_msg, ARPC_ERROR,"get_common_msg");
+
+	req_fd = (struct arpc_request_handle*)req_msg->ex_data;
 
 	req_fd->msg = msg;
 	req_fd->msg_ex = (struct arpc_msg_ex *)msg->handle;
@@ -70,7 +73,7 @@ int arpc_do_request(const arpc_session_handle_t fd, struct arpc_msg *msg, int32_
 	arpc_cond_lock(&req_msg->cond);
 	while(send_cnt < 1) {
 		send_cnt++;
-		ret = session_async_send(session_ctx, req_msg, timeout_ms);
+		ret = arpc_connection_async_send(con, req_msg);
 		if(ret){
 			ret = ARPC_ERROR;
 			ARPC_LOG_ERROR("session[%p] send fail or timeout.", session_ctx);
@@ -92,7 +95,7 @@ int arpc_do_request(const arpc_session_handle_t fd, struct arpc_msg *msg, int32_
 			MSG_CLR_REQ(ex_msg->flags);
 			arpc_cond_unlock(&req_msg->cond);
 			free_msg_arpc2xio(&req->out);
-			arpc_destroy_common_msg(req_msg);
+			put_common_msg(req_msg);
 		}else{
 			ARPC_LOG_ERROR("wait msg rx respone of request fail.");// todo 内存回收
 			ex_msg->x_rsp_msg = NULL;
@@ -112,7 +115,7 @@ unlock:
 	arpc_cond_unlock(&req_msg->cond);
 free_common_msg:
 	free_msg_arpc2xio(&req->out);
-	arpc_destroy_common_msg(req_msg);	//un lock
+	put_common_msg(req_msg);	//un lock
 	return (-ENETUNREACH);	
 }
 
@@ -131,7 +134,6 @@ int arpc_request_rsp_complete(struct arpc_common_msg *req_msg)
 	ret = arpc_cond_lock(&req_msg->cond);
 	LOG_THEN_RETURN_VAL_IF_TRUE(ret, ARPC_ERROR, "rsp copmlete cond lock fail, maybe release.");
 	req_msg_ex = (struct arpc_request_handle *)req_msg->ex_data;
-
 	SET_FLAG(req_msg_ex->msg_ex->flags, XIO_MSG_RSP);
 	MSG_CLR_REQ(req_msg_ex->msg_ex->flags);
 	if (req_msg_ex->msg && req_msg_ex->msg->proc_rsp_cb){
@@ -142,7 +144,7 @@ int arpc_request_rsp_complete(struct arpc_common_msg *req_msg)
 		}
 		arpc_cond_unlock(&req_msg->cond);
 		free_msg_arpc2xio(&req_msg_ex->msg_ex->x_req_msg.out);
-		arpc_destroy_common_msg(req_msg);	//un lock
+		put_common_msg(req_msg);	//un lock
 	}else{
 		arpc_cond_notify(&req_msg->cond);
 		arpc_cond_unlock(&req_msg->cond);
@@ -166,12 +168,17 @@ int arpc_send_oneway_msg(const arpc_session_handle_t fd, struct arpc_vmsg *send,
 	struct arpc_common_msg *req_msg = NULL;
 	struct arpc_oneway_handle *ow_msg;
 	uint32_t send_cnt = 0;
+	struct arpc_connection *con = NULL;
 
 	LOG_THEN_RETURN_VAL_IF_TRUE((!session_ctx), ARPC_ERROR, "arpc_session_handle_t fd null, exit.");
 	LOG_THEN_RETURN_VAL_IF_TRUE((!send ), ARPC_ERROR, " send null, exit.");
 
-	req_msg = arpc_create_common_msg(sizeof(struct arpc_oneway_handle));
-	LOG_THEN_RETURN_VAL_IF_TRUE(!req_msg, ARPC_ERROR,"arpc_create_common_msg");
+	ret = session_get_idle_conn(session_ctx, &con, SEND_ONEWAY_END_MAX_TIME);
+	LOG_THEN_RETURN_VAL_IF_TRUE(!con, ARPC_ERROR,"session_get_idle_conn fail");
+
+
+	req_msg = get_common_msg(con, ARPC_MSG_TYPE_OW);
+	LOG_THEN_RETURN_VAL_IF_TRUE(!req_msg, ARPC_ERROR,"get_common_msg");
 
 	ARPC_LOG_DEBUG("new msg:%p.", req_msg);//
 
@@ -182,17 +189,18 @@ int arpc_send_oneway_msg(const arpc_session_handle_t fd, struct arpc_vmsg *send,
 	req = &ow_msg->x_req_msg;
 	req_msg->tx_msg = req;
 	req_msg->type = ARPC_MSG_TYPE_OW;
-	// get msg
+
 	ret = convert_msg_arpc2xio(send, &req->out, &ow_msg->attr);
 	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, free_common_msg, "convert xio msg fail.");
 	req->user_context = req_msg;
 	if (!ow_msg->clean_send_cb){
 		req->flags |= XIO_MSG_FLAG_IMM_SEND_COMP;
 	}
+
 	arpc_cond_lock(&req_msg->cond);
 	while(send_cnt < 1) {
 		send_cnt++;
-		ret = session_async_send(session_ctx, req_msg, SEND_ONEWAY_END_MAX_TIME);
+		ret = arpc_connection_async_send(con, req_msg);
 		if (ret) {
 			ARPC_LOG_ERROR("session[%p] send timeout.", session_ctx);
 			ret = ARPC_ERROR;
@@ -200,15 +208,14 @@ int arpc_send_oneway_msg(const arpc_session_handle_t fd, struct arpc_vmsg *send,
 		}
 		break;
 	}
-	
-	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, unlock, "session send msg fail.");
 
+	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, unlock, "session send msg fail.");
 	if (!ow_msg->clean_send_cb){
 		ret = arpc_cond_wait_timeout(&req_msg->cond, SEND_ONEWAY_END_MAX_TIME); // 默认等待
 		arpc_cond_unlock(&req_msg->cond);
 		if (!ret){
 			free_msg_arpc2xio(&req->out);
-			arpc_destroy_common_msg(req_msg);	//un lock
+			put_common_msg(req_msg);	//un lock
 		}else{
 			free_msg_arpc2xio(&req->out);
 			ARPC_LOG_ERROR("wait oneway msg send complete timeout fail, msg keep."); // TODO 释放超时的资源
@@ -221,7 +228,7 @@ unlock:
 	arpc_cond_unlock(&req_msg->cond);
 free_common_msg:
 	free_msg_arpc2xio(&req->out);
-	arpc_destroy_common_msg(req_msg);	//un lock
+	put_common_msg(req_msg);	//un lock
 	return ARPC_ERROR;
 }
 
@@ -235,7 +242,6 @@ int arpc_oneway_send_complete(struct arpc_common_msg *ow_msg)
 	int ret;
 	struct arpc_oneway_handle *ow_msg_ex;
 	LOG_THEN_RETURN_VAL_IF_TRUE(!ow_msg, ARPC_ERROR, "ow_msg null, fail.");
-
 	ret = arpc_cond_lock(&ow_msg->cond);
 	LOG_THEN_RETURN_VAL_IF_TRUE(ret, ARPC_ERROR, "send copmlete cond lock fail, maybe release.");
 	ow_msg_ex = (struct arpc_oneway_handle *)ow_msg->ex_data;
@@ -244,12 +250,11 @@ int arpc_oneway_send_complete(struct arpc_common_msg *ow_msg)
 		ow_msg_ex->clean_send_cb(ow_msg_ex->send, ow_msg_ex->send_ctx);
 		arpc_cond_unlock(&ow_msg->cond);
 		free_msg_arpc2xio(&ow_msg_ex->x_req_msg.out);
-		arpc_destroy_common_msg(ow_msg);	//un lock
+		put_common_msg(ow_msg);	//un lock
 	}else{
 		arpc_cond_notify(&ow_msg->cond);
 		arpc_cond_unlock(&ow_msg->cond);
 	}
-
 	ARPC_LOG_DEBUG("send end complete.");
 	return 0;
 }

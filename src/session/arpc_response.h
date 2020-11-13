@@ -32,15 +32,6 @@
 extern "C" {
 #endif
 
-struct arpc_rsp_handle {
-	struct xio_msg				x_req_msg;
-    struct xio_msg				*x_rsp_msg;
-	struct arpc_vmsg 			*rsp_usr_iov;
-	struct arpc_msg_attr		attr;
-	int (*release_rsp_cb)(struct arpc_vmsg *rsp_iov, void* rsp_usr_ctx);
-	void *rsp_usr_ctx;
-};
-
 int arpc_init_response(struct arpc_common_msg *rsp_fd);
 int arpc_send_response_complete(struct arpc_common_msg *rsp_fd);
 
