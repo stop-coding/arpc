@@ -77,7 +77,7 @@ int arpc_destroy_session(struct arpc_session_handle* session, int64_t timeout_ms
 	session->is_close = 1;
 	arpc_cond_notify_all(&session->cond);//通知释放资源
 	arpc_cond_unlock(&session->cond);
-
+	arpc_usleep(10*1000);
 	ret = arpc_cond_lock(&session->cond); /* 锁 */
 	LOG_THEN_RETURN_VAL_IF_TRUE(ret, -1, "arpc_cond_lock session fail.");
 
@@ -87,7 +87,9 @@ int arpc_destroy_session(struct arpc_session_handle* session, int64_t timeout_ms
 			QUEUE_FOREACH_VAL(&session->q_con, iter, 
 			{
 				con = QUEUE_DATA(iter, struct arpc_connection, q);
+				arpc_cond_unlock(&session->cond);
 				ret = arpc_client_disconnect(con, timeout_ms);
+				arpc_cond_lock(&session->cond);
 				LOG_ERROR_IF_VAL_TRUE(ret, "arpc_client_disconnect fail.");
 			});
 		}
@@ -108,7 +110,9 @@ int arpc_destroy_session(struct arpc_session_handle* session, int64_t timeout_ms
 		QUEUE_REMOVE(iter);
 		QUEUE_INIT(iter);
 		arpc_unlock_connection(con);
+		arpc_cond_unlock(&session->cond);
 		ret = arpc_destroy_connection(con);
+		arpc_cond_lock(&session->cond);
 		LOG_ERROR_IF_VAL_TRUE(ret, "arpc_destroy_connection fail.");
 	}
 	// 
@@ -267,7 +271,7 @@ int session_client_teardown_event(struct arpc_session_handle *session)
 	LOG_THEN_RETURN_VAL_IF_TRUE(!session, ARPC_ERROR, "session is null.");
 
 	ret = arpc_cond_lock(&session->cond);
-	LOG_THEN_RETURN_VAL_IF_TRUE(ret, ARPC_ERROR, "arpc_mutex_lock session[%p] fail.", session);
+	LOG_THEN_RETURN_VAL_IF_TRUE(ret, ARPC_ERROR, "arpc_cond_lock session[%p] fail.", session);
 	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(session->type != ARPC_SESSION_CLIENT, unlock, "session not client.");
 	ARPC_LOG_DEBUG("session[%p], close:%u, flag:%x, status:%d",session, session->is_close, session->flags, session->status);
 	if (session->is_close || IS_SET(session->flags, ARPC_SESSION_ATTR_AUTO_DISCONNECT) 
