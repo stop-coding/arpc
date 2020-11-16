@@ -36,7 +36,7 @@ int process_oneway_header(struct xio_msg *msg, struct oneway_ops *ops, uint64_t 
 	head_ops.alloc_cb = ops->alloc_cb;
 	head_ops.free_cb = ops->free_cb;
 	head_ops.proc_head_cb = ops->proc_head_cb;
-
+	ARPC_LOG_TRACE("get oneway msg head");
 	return create_xio_msg_usr_buf(msg, &head_ops, iov_max_len, usr_ctx);
 }
 
@@ -58,7 +58,7 @@ int process_oneway_data(struct xio_msg *req, struct oneway_ops *ops, int last_in
 		//小IO，默认同步执行,这个还是让应用自己决定吧
 	//	SET_FLAG(req->usr_flags, METHOD_ARPC_PROC_SYNC);
 	//}
-
+	ARPC_LOG_TRACE("get oneway msg data");
 	ret = move_msg_xio2arpc(&req->in, &rev_iov, NULL);
 	LOG_THEN_RETURN_VAL_IF_TRUE((ret), ARPC_ERROR, "move_msg_xio2arpc fail.");
 
@@ -72,6 +72,7 @@ int process_oneway_data(struct xio_msg *req, struct oneway_ops *ops, int last_in
 		if(!IS_SET(flags, METHOD_CALLER_HIJACK_RX_DATA)){
 			free_msg_xio2arpc(&rev_iov, ops->free_cb, usr_ctx);
 		}
+		ARPC_LOG_TRACE("deel oneway msg data end");
 	}else {
 		ARPC_LOG_DEBUG("set proc_async_cb data.");
 		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!IS_SET(req->usr_flags, METHOD_ALLOC_DATA_BUF) && nents, 
@@ -118,7 +119,7 @@ static int oneway_msg_async_deal(void *usr_ctx)
 
 	ret = async->ops.proc_oneway_async_cb(&async->rev_iov, &flags, async->usr_ctx);
 	LOG_ERROR_IF_VAL_TRUE(ret, "proc_oneway_async_cb error.");
-
+	ARPC_LOG_TRACE("deel oneway msg data end");
 	if (!IS_SET(flags, METHOD_CALLER_HIJACK_RX_DATA)){
 		free_msg_xio2arpc(&async->rev_iov, async->ops.free_cb, async->usr_ctx);
 	}

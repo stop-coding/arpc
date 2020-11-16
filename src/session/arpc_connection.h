@@ -47,6 +47,12 @@ enum arpc_connection_type{
 	ARPC_CON_TYPE_SERVER, 	//
 };
 
+enum arpc_io_type{
+	ARPC_IO_TYPE_IO = 0,
+	ARPC_IO_TYPE_OUT, //
+	ARPC_IO_TYPE_IN,  //
+};
+
 #define ARPC_CONN_MAGIC 0xff36a97
 struct arpc_connection {
 	QUEUE 						q;
@@ -58,6 +64,7 @@ struct arpc_session_handle;
 struct arpc_session_ops;
 
 struct arpc_connection_param {
+	enum arpc_io_type		io_type;
 	enum arpc_connection_type type;
 	uint32_t 				id;
 	struct arpc_session_handle  *session;
@@ -88,7 +95,8 @@ uint32_t arpc_get_max_iov_len(struct arpc_connection *con);
 int arpc_lock_connection(struct arpc_connection *con);
 int arpc_unlock_connection(struct arpc_connection *con);
 
-int arpc_check_connection_valid(struct arpc_connection *conn);
+int set_connection_io_type(struct arpc_connection *conn, enum arpc_io_type type);
+int arpc_check_connection_valid(struct arpc_connection *conn, enum  arpc_msg_type msg_type);
 
 int arpc_connection_async_send(const struct arpc_connection *conn, struct arpc_common_msg  *msg);
 int arpc_connection_send_comp_notify(const struct arpc_connection *conn, struct arpc_common_msg *msg);

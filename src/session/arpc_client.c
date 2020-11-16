@@ -56,6 +56,7 @@ arpc_session_handle_t arpc_client_create_session(const struct arpc_client_sessio
 	struct xio_connection_params xio_con_param;
 	struct arpc_connection_param conn_param;
 	struct arpc_proto_new_session req_new;
+	uint32_t rx_con_num = 1;
 	//LOG_THEN_RETURN_VAL_IF_TRUE(!param->ops, NULL, "ops is null.");
 
 	session = arpc_create_session(ARPC_SESSION_CLIENT, sizeof(struct arpc_client_ctx));
@@ -122,8 +123,15 @@ arpc_session_handle_t arpc_client_create_session(const struct arpc_client_sessio
 	if (conn_param.timeout_ms > 0){
 		SET_FLAG(session->flags, ARPC_SESSION_ATTR_AUTO_DISCONNECT);
 	}
+	rx_con_num = (param->rx_con_num > 1 && param->rx_con_num <= (idle_thread_num/2))?(param->rx_con_num):(idle_thread_num/2);
+
 	for (i = 0; i < idle_thread_num; i++) {
 		conn_param.id = i;
+		if (i < rx_con_num) {
+			conn_param.io_type = ARPC_IO_TYPE_IN;
+		}else{
+			conn_param.io_type = ARPC_IO_TYPE_IO;
+		}
 		con = arpc_create_connection(&conn_param);
 		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!con, error_2, "arpc_create_connection fail.");
 		ret = session_insert_con(session, con);
@@ -135,7 +143,7 @@ arpc_session_handle_t arpc_client_create_session(const struct arpc_client_sessio
 		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, error_2, "client session connect server[%s] fail", client_ctx->uri);
 	}
 
-	ARPC_LOG_NOTICE("Create session[%p] success, work thread num[%u]!!", session, idle_thread_num);
+	ARPC_LOG_NOTICE("Create session[%p] success, work thread num[%u], rx num[%u]!!", session, idle_thread_num, rx_con_num);
 	return (arpc_session_handle_t)session;
 
 destroy_conn:

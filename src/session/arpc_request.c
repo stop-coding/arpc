@@ -46,7 +46,7 @@ int arpc_do_request(const arpc_session_handle_t fd, struct arpc_msg *msg, int32_
 
 	LOG_THEN_RETURN_VAL_IF_TRUE((!session_ctx || !msg ), ARPC_ERROR, "arpc_session_handle_t fd null, exit.");
 
-	ret = session_get_idle_conn(session_ctx, &con, timeout_ms);
+	ret = session_get_idle_conn(session_ctx, &con, ARPC_MSG_TYPE_REQ, timeout_ms);
 	LOG_THEN_RETURN_VAL_IF_TRUE(!con, ARPC_ERROR,"session_get_idle_conn fail");
 
 	req_msg = get_common_msg(con, ARPC_MSG_TYPE_REQ);
@@ -173,7 +173,7 @@ int arpc_send_oneway_msg(const arpc_session_handle_t fd, struct arpc_vmsg *send,
 	LOG_THEN_RETURN_VAL_IF_TRUE((!session_ctx), ARPC_ERROR, "arpc_session_handle_t fd null, exit.");
 	LOG_THEN_RETURN_VAL_IF_TRUE((!send ), ARPC_ERROR, " send null, exit.");
 
-	ret = session_get_idle_conn(session_ctx, &con, SEND_ONEWAY_END_MAX_TIME);
+	ret = session_get_idle_conn(session_ctx, &con, ARPC_MSG_TYPE_OW, SEND_ONEWAY_END_MAX_TIME);
 	LOG_THEN_RETURN_VAL_IF_TRUE(!con, ARPC_ERROR,"session_get_idle_conn fail");
 
 

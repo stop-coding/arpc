@@ -66,8 +66,8 @@ int msg_data_process(struct xio_session *session,struct xio_msg *msg, int last_i
 			ret = process_rsp_data(msg, last_in_rxq, conn);
 			break;
 		case XIO_MSG_TYPE_ONE_WAY:
-			//ret = set_connection_rx_mode(conn);
-			//LOG_ERROR_IF_VAL_TRUE(ret, "set_connection_rx_mode fail.");
+			ret = set_connection_io_type(conn, ARPC_IO_TYPE_IN);
+			LOG_ERROR_IF_VAL_TRUE(ret, "set_connection_rx_mode fail.");
 			ret = process_oneway_data(msg, &conn_ops->oneway_ops, last_in_rxq, arpc_get_ops_ctx(conn));
 			break;
 		default:

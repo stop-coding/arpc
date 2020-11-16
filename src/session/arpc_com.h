@@ -44,7 +44,8 @@ extern "C" {
 #define ARPC_LOG_ERROR(format, arg...) BASE_LOG_ERROR(format, ##arg)
 #define ARPC_LOG_NOTICE(format, arg...) BASE_LOG_NOTICE(format, ##arg)
 #define ARPC_LOG_DEBUG(format, arg...) 	BASE_LOG_DEBUG(format,  ##arg)
-#define ARPC_LOG_TRACE(format, arg...) 	BASE_LOG_TRACE(format,  ##arg)
+//#define ARPC_LOG_TRACE(format, arg...) 	BASE_LOG_TRACE(format,  ##arg)
+#define ARPC_LOG_TRACE(format, arg...)
 
 #define ARPC_ASSERT(condition, format, arg...) BASE_ASSERT(condition, format, ##arg)
 

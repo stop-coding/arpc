@@ -377,7 +377,8 @@ free_conn:
 	return ARPC_ERROR;
 }
 
-int session_async_send(struct arpc_session_handle *session, struct arpc_common_msg  *msg, int64_t timeout_ms)
+int session_get_idle_conn(struct arpc_session_handle *session, struct arpc_connection **conn, 
+							enum  arpc_msg_type msg_type, int64_t timeout_ms)
 {
 	int ret;
 	QUEUE* iter;
@@ -401,58 +402,7 @@ int session_async_send(struct arpc_session_handle *session, struct arpc_common_m
 		QUEUE_FOREACH_VAL(&session->q_con, iter,
 		{
 			con = QUEUE_DATA(iter, struct arpc_connection, q);
-			ret = arpc_check_connection_valid(con);
-			if(!ret){
-				ret = arpc_lock_connection(con);
-				QUEUE_REMOVE(&con->q);
-				QUEUE_INSERT_TAIL(&session->q_con, &con->q);
-				arpc_unlock_connection(con);
-				break;
-			}
-			con = NULL;
-		});
-		
-		if(con){break;}
-		try_time++;
-		ARPC_LOG_NOTICE("warning: session[%p][con_num:%u] no idle connection, wait[%u ms]...", session, session->conn_num, ARPC_SESSION_BUSY_WAIT_TIME_MS);
-		ret = arpc_cond_wait_timeout(&session->cond, ARPC_SESSION_BUSY_WAIT_TIME_MS);
-		if (ret && try_time > ARPC_SESSION_BUSY_RETRY_CNT) {
-			ARPC_LOG_ERROR("session[%p] wait idle connection timeout[%lu ms].", session, (uint64_t)(try_time *ARPC_SESSION_BUSY_WAIT_TIME_MS));
-			goto unlock;
-		}
-	}
-	arpc_cond_unlock(&session->cond);
-	return (con)?arpc_connection_async_send(con, msg):ARPC_ERROR;
-unlock:
-	arpc_cond_unlock(&session->cond);
-	return ARPC_ERROR;
-}
-
-int session_get_idle_conn(struct arpc_session_handle *session, struct arpc_connection **conn, int64_t timeout_ms)
-{
-	int ret;
-	QUEUE* iter;
-	int try_time = 0;
-	struct arpc_connection *con = NULL;
-
-	LOG_THEN_RETURN_VAL_IF_TRUE(!session, ARPC_ERROR, "session is null.");
-
-	ret = arpc_cond_lock(&session->cond);
-	LOG_THEN_RETURN_VAL_IF_TRUE(ret, ARPC_ERROR, "arpc_mutex_lock session[%p] fail.", session);
-	if (session->type == ARPC_SESSION_CLIENT && session->status == ARPC_SES_STA_CLOSE
-		&& IS_SET(session->flags, ARPC_SESSION_ATTR_AUTO_DISCONNECT)) {
-		ret = session_client_connect(session, timeout_ms);
-		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, unlock,"session_client_connect fail");
-	}
-
-	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(QUEUE_EMPTY(&session->q_con), unlock,"connection empty fail");
-	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(session->status != ARPC_SES_STA_ACTIVE, unlock, 
-								"session[%p] invalid, session status[%d]", session, session->status);
-	while(!con){
-		QUEUE_FOREACH_VAL(&session->q_con, iter,
-		{
-			con = QUEUE_DATA(iter, struct arpc_connection, q);
-			ret = arpc_check_connection_valid(con);
+			ret = arpc_check_connection_valid(con, msg_type);
 			if(!ret){
 				ret = arpc_lock_connection(con);
 				QUEUE_REMOVE(&con->q);

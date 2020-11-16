@@ -65,17 +65,13 @@ void arpc_vlog(enum arpc_log_level level, const char *module, const char *file,u
 	}else{
 		snprintf(buf2, sizeof(buf2), "%s:%u", short_file, line);
 	}
-	/*
-	fprintf(stderr,
-		"[%012lu.%06lu] %-28s [%-5s] - %s",
-		tv.tv_sec, tv.tv_usec, buf2, level_str[level], buf);
-	*/
-	/*fprintf(stderr,
-		"[" LOG_TIME_FMT "] %-28s [%-5s] - %s",
+
+	fprintf(stderr, "[%-5s][%-5x][%-5s] [" LOG_TIME_FMT "] %-24s - %s\n", module, gettid(),
+		level_str[level],
 		t.tm_year + 1900, t.tm_mon + 1, t.tm_mday,
 		t.tm_hour, t.tm_min, t.tm_sec, tv.tv_usec,
 		buf2,
-		level_str[level], buf);*/
+		buf);
 	syslog(LOG_ERR, "[%-5s][%-5x][%-5s] [" LOG_TIME_FMT "] %-24s - %s", module, gettid(),
 		level_str[level],
 		t.tm_year + 1900, t.tm_mon + 1, t.tm_mday,

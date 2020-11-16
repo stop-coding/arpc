@@ -93,6 +93,7 @@ struct arpc_connection_ctx {
 	struct xio_connection		*xio_con;				/* connection 资源*/
 	struct xio_context			*xio_con_ctx;			/* context 资源*/
 	struct arpc_session_handle  *session;
+	enum arpc_io_type			io_type;
 	enum arpc_connection_type   type;				
 	enum arpc_connection_status	status;
 	void						*usr_ctx;
@@ -166,6 +167,7 @@ struct arpc_connection *arpc_create_connection(const struct arpc_connection_para
 	ctx->conn_timeout_ms = param->timeout_ms;
 
 	ctx->status = ARPC_CON_STA_INIT;
+	ctx->io_type = param->io_type;
 	ctx->type = param->type;
 	ctx->session = param->session;
 	ctx->msg_iov_max_len = param->session->msg_iov_max_len;
@@ -829,18 +831,38 @@ unlock:
 	return ARPC_ERROR;
 }
 
-int arpc_check_connection_valid(struct arpc_connection *conn)
+int arpc_check_connection_valid(struct arpc_connection *conn, enum  arpc_msg_type msg_type)
 {
 	int ret = 0;
 	CONN_CTX(ctx, conn, ARPC_ERROR);
 
+	ret = arpc_cond_lock(&ctx->cond);
+	LOG_THEN_RETURN_VAL_IF_TRUE(ret, ARPC_ERROR, "arpc_cond_lock conn[%u][%p] fail.", conn->id, conn);
+
+	if ((ctx->io_type == ARPC_IO_TYPE_IN) && (msg_type == ARPC_MSG_TYPE_OW)) {
+		ARPC_LOG_DEBUG("conn[%u], io_type[%d], msg_type[%d]", conn->id, ctx->io_type, msg_type);
+		arpc_cond_unlock(&ctx->cond);
+		return ARPC_ERROR;
+	}
+
 	if ((ctx->tx_msg_num > ARPC_CONN_TX_MAX_DEPTH) || (ctx->status != ARPC_CON_STA_RUN_ACTIVE)) {
-		ARPC_LOG_ERROR("conn[%u], tx num[%lu], status[%d]", conn->id, ctx->tx_msg_num, ctx->status);
+		ARPC_LOG_DEBUG("conn[%u], tx num[%lu], status[%d]", conn->id, ctx->tx_msg_num, ctx->status);
 		ret = ARPC_ERROR;
 	}
+	arpc_cond_unlock(&ctx->cond);
 	return ret;
 }
 
+int set_connection_io_type(struct arpc_connection *conn, enum arpc_io_type type)
+{
+	int ret = 0;
+	CONN_CTX(ctx, conn, ARPC_ERROR);
+	ret = arpc_cond_lock(&ctx->cond);
+	LOG_THEN_RETURN_VAL_IF_TRUE(ret, ARPC_ERROR, "arpc_cond_lock conn[%u][%p] fail.", conn->id, conn);
+	ctx->io_type = type;
+	arpc_cond_unlock(&ctx->cond);
+	return 0;
+}
 
 int arpc_connection_send_comp_notify(const struct arpc_connection *conn, struct arpc_common_msg *msg)
 {
