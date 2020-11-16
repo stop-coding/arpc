@@ -54,6 +54,8 @@ int msg_data_process(struct xio_session *session,struct xio_msg *msg, int last_i
 	ARPC_CONN_OPS_CTX(conn, conn_ops, conn_context);
 
 	ARPC_LOG_DEBUG("msg_data_dispatch, msg type:%d", msg->type);
+	ret = keep_conn_heartbeat(conn);
+	LOG_THEN_RETURN_VAL_IF_TRUE(ret, -1, "keep_conn_heartbeat fail.");
 
 	ret = check_xio_msg_valid(conn, &msg->in);
 	LOG_THEN_RETURN_VAL_IF_TRUE(ret, -1, "check_xio_msg_valid fail.");

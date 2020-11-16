@@ -376,7 +376,7 @@ static int server_on_new_session(struct xio_session *session,struct xio_new_sess
 			}
 			break;
 		});
-
+		new_session->conn_num = work_num;
 		xio_accept(session, (const char **)uri_vec, work_num, param.rsp_data, param.rsp_data_len); 
 		for (i = 0; i < work_num; i++) {
 			arpc_mem_free(uri_vec[i], NULL);

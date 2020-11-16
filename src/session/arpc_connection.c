@@ -114,7 +114,7 @@ struct arpc_connection_ctx {
 	int64_t						conn_timeout_ms;					
 };
 
-
+static void check_session_active(struct arpc_connection_ctx *ctx);
 static int  arpc_client_run_loop(void * thread_ctx);
 static int  arpc_add_event_to_conn(struct arpc_connection *con);
 static int  arpc_del_event_to_conn(struct arpc_connection *con);
@@ -534,6 +534,7 @@ static int arpc_client_run_loop(void * thread_ctx)
 	cpu_set_t		cpuset;
 	int ret;
 	char thread_name[16+1] ={0};
+	int64_t time_out_ms = XIO_INFINITE;
 	CONN_CTX(ctx, con, ARPC_ERROR);
 
 	LOG_THEN_RETURN_VAL_IF_TRUE(ctx->magic != ARPC_CONN_MAGIC, -1, "magic error.");
@@ -555,15 +556,18 @@ static int arpc_client_run_loop(void * thread_ctx)
 
 	arpc_cond_notify(&ctx->cond);
 	ARPC_LOG_DEBUG("conn_timeout_ms[%ld] timeout.", ctx->conn_timeout_ms);
-	if(ctx->conn_timeout_ms <= 0) {
-		ctx->conn_timeout_ms = XIO_INFINITE;
+	if(ctx->conn_timeout_ms > 0) {
+		time_out_ms = ctx->conn_timeout_ms;
 	}
 	for(;;){
 		arpc_cond_unlock(&ctx->cond);
-		ret = xio_context_run_loop(ctx->xio_con_ctx, ctx->conn_timeout_ms);
+		ret = xio_context_run_loop(ctx->xio_con_ctx, time_out_ms);
 		if (ret) {
 			ARPC_LOG_ERROR("xio loop error msg: %s.", xio_strerror(xio_errno()));
 		}
+
+		check_session_active(ctx);
+
 		ret = arpc_cond_lock(&ctx->cond);
 		LOG_THEN_RETURN_VAL_IF_TRUE(ret, ARPC_ERROR, "arpc_cond_lock con cond fail.");
 
@@ -571,23 +575,14 @@ static int arpc_client_run_loop(void * thread_ctx)
 			if (ctx->xio_con) {
 				xio_disconnect(ctx->xio_con);
 				ctx->xio_con = NULL;
-				ctx->conn_timeout_ms = ARPC_CONN_EXIT_MAX_TIMES_MS/8;
+				time_out_ms = ARPC_CONN_EXIT_MAX_TIMES_MS/8;
 				continue;
 			}else{
 				CLR_FLAG(ctx->flags, ARPC_CONN_ATTR_EXIT);
 				break;
 			}
 		}
-
-		// 链路保活检测
-		if (ctx->conn_timeout_ms > 0) {
-			if (IS_SET(ctx->flags, ARPC_CONN_ATTR_TELL_LIVE)){
-				CLR_FLAG(ctx->flags, ARPC_CONN_ATTR_TELL_LIVE);
-			}else{
-				SET_FLAG(ctx->flags, ARPC_CONN_ATTR_EXIT);
-			}
-		}
-		ARPC_LOG_DEBUG("xio connection[%u] loop continue.", con->id);
+		ARPC_LOG_NOTICE("xio connection[%u] loop continue, timeout[%ld ms], flags[0x%x].", con->id, time_out_ms, ctx->flags);
 	}
 
 exit_thread:
@@ -775,6 +770,62 @@ int check_xio_msg_valid(const struct arpc_connection *conn, const struct xio_vms
 	return 0;
 }
 
+int keep_conn_heartbeat(const struct arpc_connection *conn)
+{
+	int ret;
+	CONN_CTX(ctx, conn, ARPC_ERROR);
+	ret = arpc_cond_lock(&ctx->cond);
+	LOG_THEN_RETURN_VAL_IF_TRUE(ret, ARPC_ERROR, "arpc_cond_lock conn[%u][%p] fail.", conn->id, conn);
+	SET_FLAG(ctx->flags, ARPC_CONN_ATTR_TELL_LIVE);
+	arpc_cond_unlock(&ctx->cond);
+	return 0;
+}
+
+static void check_session_active(struct arpc_connection_ctx *ctx)
+{
+	int ret;
+	QUEUE* iter;
+	struct arpc_connection *conn;
+	struct arpc_session_handle *session;
+	struct arpc_connection_ctx *conn_ctx;
+	int is_active = 0;
+
+	if (ctx->conn_timeout_ms <= 0 || ctx->type != ARPC_CON_TYPE_CLIENT) {
+		return;
+	}
+	if (!ctx->session) {
+		return;
+	}
+	session = ctx->session;
+	ret = arpc_cond_lock(&session->cond);
+	LOG_THEN_RETURN_VAL_IF_TRUE(ret, ;, "arpc_cond_lock session[%p] fail.", session);
+
+	QUEUE_FOREACH_VAL(&session->q_con, iter,
+	{
+		conn = QUEUE_DATA(iter, struct arpc_connection, q);
+		conn_ctx = (struct arpc_connection_ctx *)conn->ctx;
+		ret = arpc_cond_lock(&conn_ctx->cond);
+		if(IS_SET(conn_ctx->flags, ARPC_CONN_ATTR_TELL_LIVE)) {
+			is_active = 1;
+			arpc_cond_unlock(&conn_ctx->cond);
+			break;
+		}
+		arpc_cond_unlock(&conn_ctx->cond);
+	});
+	arpc_cond_unlock(&session->cond);
+
+	arpc_cond_lock(&ctx->cond);
+	if (is_active){
+		CLR_FLAG(ctx->flags, ARPC_CONN_ATTR_TELL_LIVE);
+	}else{
+		SET_FLAG(ctx->flags, ARPC_CONN_ATTR_EXIT);
+	}
+	arpc_cond_unlock(&ctx->cond);
+	
+	return;
+}
+
+
 int arpc_connection_async_send(const struct arpc_connection *conn, struct arpc_common_msg  *msg)
 {
 	int ret;
@@ -789,7 +840,6 @@ int arpc_connection_async_send(const struct arpc_connection *conn, struct arpc_c
 	LOG_THEN_GOTO_TAG_IF_VAL_TRUE((ctx->status != ARPC_CON_STA_RUN_ACTIVE), unlock, 
 									"conn[%u] status[%d] not active", conn->id, ctx->status);
 	SET_FLAG(ctx->flags, ARPC_CONN_ATTR_TELL_LIVE);
-
 	ret = check_xio_msg_valid(conn, &msg->tx_msg->out);
 	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, unlock, "check msg invalid.");
 
@@ -846,7 +896,7 @@ int arpc_check_connection_valid(struct arpc_connection *conn, enum  arpc_msg_typ
 	}
 
 	if ((ctx->tx_msg_num > ARPC_CONN_TX_MAX_DEPTH) || (ctx->status != ARPC_CON_STA_RUN_ACTIVE)) {
-		ARPC_LOG_DEBUG("conn[%u], tx num[%lu], status[%d]", conn->id, ctx->tx_msg_num, ctx->status);
+		ARPC_LOG_ERROR("conn[%u], tx num[%lu], status[%d], io_type[%d]", conn->id, ctx->tx_msg_num, ctx->status, ctx->io_type);
 		ret = ARPC_ERROR;
 	}
 	arpc_cond_unlock(&ctx->cond);

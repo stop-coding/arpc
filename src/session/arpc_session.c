@@ -415,7 +415,8 @@ int session_get_idle_conn(struct arpc_session_handle *session, struct arpc_conne
 		
 		if(con){break;}
 		try_time++;
-		ARPC_LOG_NOTICE("warning: session[%p][con_num:%u] no idle connection, wait[%u ms]...", session, session->conn_num, ARPC_SESSION_BUSY_WAIT_TIME_MS);
+		ARPC_LOG_NOTICE("warning: session[%p][con_num:%u], status[%u],flags[0x%x] wait[%u ms]...", 
+						session, session->conn_num, session->status, session->flags, ARPC_SESSION_BUSY_WAIT_TIME_MS);
 		ret = arpc_cond_wait_timeout(&session->cond, ARPC_SESSION_BUSY_WAIT_TIME_MS);
 		if (ret && try_time > ARPC_SESSION_BUSY_RETRY_CNT) {
 			ARPC_LOG_ERROR("session[%p] wait idle connection timeout[%lu ms].", session, (uint64_t)(try_time *ARPC_SESSION_BUSY_WAIT_TIME_MS));

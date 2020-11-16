@@ -102,6 +102,7 @@ int arpc_connection_async_send(const struct arpc_connection *conn, struct arpc_c
 int arpc_connection_send_comp_notify(const struct arpc_connection *conn, struct arpc_common_msg *msg);
 
 int check_xio_msg_valid(const struct arpc_connection *conn, const struct xio_vmsg *pmsg);
+int keep_conn_heartbeat(const struct arpc_connection *conn);
 
 struct arpc_common_msg *get_common_msg(const struct arpc_connection *conn, enum  arpc_msg_type type);
 void put_common_msg(struct arpc_common_msg *msg);
