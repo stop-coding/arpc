@@ -591,7 +591,7 @@ exit_thread:
 		xio_context_destroy(ctx->xio_con_ctx);
 		ctx->xio_con_ctx = NULL;
 	}
-	
+	ctx->flags = 0;
 	prctl(PR_SET_NAME, "share_thread");
 	arpc_cond_notify(&ctx->cond);
 	ARPC_LOG_DEBUG("xio connection[%u] on thread[%lu] exit now.", con->id,  pthread_self());
