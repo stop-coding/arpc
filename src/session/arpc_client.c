@@ -183,6 +183,7 @@ enum arpc_session_status arpc_get_session_status(const arpc_session_handle_t fd)
 static int client_session_established(struct xio_session *session, struct xio_new_session_rsp *rsp, void *session_context)
 {
 	SESSION_CTX(session_ctx, session_context);
+	ARPC_LOG_TRACE("session established for client");
 	return session_established_for_client(session_ctx);
 }
 
@@ -194,7 +195,7 @@ static int client_session_event(struct xio_session *session, struct xio_session_
 	SESSION_CTX(session_ctx, session_context);
 
 	con_ctx = (struct arpc_connection *)event_data->conn_user_context;
-	ARPC_LOG_NOTICE("#### event:%d|%s. reason: %s.", event_data->event,
+	ARPC_LOG_TRACE("#### event:%d|%s. reason: %s.", event_data->event,
 					xio_session_event_str(event_data->event), 
 					xio_strerror(event_data->reason));
 	

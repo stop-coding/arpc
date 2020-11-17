@@ -202,14 +202,14 @@ static int server_session_event(struct xio_session *session, struct xio_session_
 	struct arpc_connection_param param;
 	SESSION_CTX(session_fd, session_context);
 
-	ARPC_LOG_DEBUG("##### session event:%d ,%s. reason: %s.",event_data->event,
+	ARPC_LOG_TRACE("##### session event:%d ,%s. reason: %s.",event_data->event,
 					xio_session_event_str(event_data->event),
 	       			xio_strerror(event_data->reason));
 	session_ctx = (struct arpc_new_session_ctx *)session_fd->ex_ctx;
 	switch (event_data->event) {
 		case XIO_SESSION_NEW_CONNECTION_EVENT:	//新的链路
 			if(event_data->conn_user_context == session_ctx->server){
-				ARPC_LOG_DEBUG("##### new connection[%p] is main thread,not need build.", event_data->conn);
+				ARPC_LOG_TRACE("##### new connection[%p] is main thread,not need build.", event_data->conn);
 				break;
 			}
 			work = (struct arpc_server_work *)event_data->conn_user_context;
@@ -226,7 +226,7 @@ static int server_session_event(struct xio_session *session, struct xio_session_
 
 			memset(&attr, 0, sizeof(struct xio_connection_attr));
 			attr.user_context = con;
-			ARPC_LOG_DEBUG("##### new connection[%u][%p] create success.", con->id, con);
+			ARPC_LOG_TRACE("##### new connection[%u][%p] create success.", con->id, con);
 			xio_modify_connection(event_data->conn, &attr, XIO_CONNECTION_ATTR_USER_CTX);
 
 			ret = session_insert_con(session_fd, con);
@@ -241,18 +241,18 @@ static int server_session_event(struct xio_session *session, struct xio_session_
 		case XIO_SESSION_CONNECTION_TEARDOWN_EVENT:
 			if(event_data->conn_user_context != session_ctx->server){
 				con = (struct arpc_connection *)event_data->conn_user_context;
-				ARPC_LOG_DEBUG("##### connection[%u][%p] teardown.", con->id, con);
+				ARPC_LOG_TRACE("##### connection[%u][%p] teardown.", con->id, con);
 				ret = session_remove_con(session_fd, con);
 				LOG_ERROR_IF_VAL_TRUE(ret, "session_remove_con fail.");
 				arpc_set_disconnect_status(con);
 				arpc_destroy_connection(con);
 			}else{
-				ARPC_LOG_DEBUG("connection[%p] is main thread, need tear down.", event_data->conn);
+				ARPC_LOG_TRACE("connection[%p] is main thread, need tear down.", event_data->conn);
 			}
 			xio_connection_destroy(event_data->conn);
 			break;
 		case XIO_SESSION_TEARDOWN_EVENT:
-			ARPC_LOG_DEBUG("##### session[%p] teardown.", session_fd);
+			ARPC_LOG_TRACE("##### session[%p] teardown.", session_fd);
 			ret = server_remove_session(session_ctx->server, session_fd);
 			LOG_ERROR_IF_VAL_TRUE(ret, "server_insert_session fail.");
 			if(session_ctx->server->session_teardown){

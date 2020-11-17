@@ -70,8 +70,10 @@ int process_request_data(struct arpc_connection *con, struct xio_msg *req, struc
 	usr_rsp_param.rsp_fd = (void *)rsp_hanlde;
 
 	if(IS_SET(req->usr_flags, METHOD_ARPC_PROC_SYNC) && ops->proc_data_cb){
-		ARPC_LOG_DEBUG("set sync proc_data_cb data.");
+		ARPC_LOG_TRACE("process rx request msg with async.");
 		ret = ops->proc_data_cb(&rev_iov, &usr_rsp_param, usr_ctx);
+		ARPC_LOG_TRACE("process rx request msg end with async.");
+
 		LOG_ERROR_IF_VAL_TRUE(ret, "proc_data_cb that define for user is error.");
 		if (!IS_SET(usr_rsp_param.flags, METHOD_CALLER_HIJACK_RX_DATA)) {
 			free_msg_xio2arpc(&rev_iov, ops->free_cb, usr_ctx);
@@ -115,6 +117,7 @@ free_user_buf:
 
 do_respone:	
 	/* attach request to response */
+	ARPC_LOG_TRACE("do respone request msg.");
 	ret = arpc_init_response(rsp_hanlde);
 	LOG_ERROR_IF_VAL_TRUE(ret, "arpc_init_response fail.");
 	if(!ret){
@@ -132,16 +135,18 @@ static int request_msg_async_deal(void *usr_ctx)
 	struct arpc_common_msg *rsp_fd;
 	struct arpc_rsp_handle	*rsp_fd_ex;
 
-	ARPC_LOG_DEBUG("Note: msg deal on thread[%lu]...", pthread_self());// to do
 	LOG_THEN_RETURN_VAL_IF_TRUE(!async, ARPC_ERROR, "async null.");
 	LOG_THEN_RETURN_VAL_IF_TRUE(!async->ops.proc_async_cb, ARPC_ERROR, "request proc_async_cb null.");
 	LOG_THEN_RETURN_VAL_IF_TRUE(!async->rsp_ctx, ARPC_ERROR, "request rsp context is null.");
 
 	rsp_fd  = (struct arpc_common_msg *)async->rsp_ctx;
 	memset(&rsp, 0, sizeof (struct arpc_rsp));						
-	rsp.rsp_fd = (void*)rsp_fd;	
+	rsp.rsp_fd = (void*)rsp_fd;
 
+	ARPC_LOG_TRACE("process request msg with async.");
 	ret = async->ops.proc_async_cb(&async->rev_iov, &rsp, async->usr_ctx);
+	ARPC_LOG_TRACE("process request msg with end async.");
+
 	LOG_ERROR_IF_VAL_TRUE(ret, "proc_async_cb of request error.");
 
 	if (!IS_SET(rsp.flags, METHOD_CALLER_HIJACK_RX_DATA)) {

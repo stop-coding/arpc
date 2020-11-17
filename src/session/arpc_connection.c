@@ -29,12 +29,10 @@
 
 #define WAIT_THREAD_RUNING_TIMEOUT (1000)
 
-static const char pipe_magic[] = "msg";
-
 #define ARPC_EVENT_BUF_MAX_LEN 	4
 
 #define ARPC_CONN_TX_MAX_DEPTH	  		500
-#define ARPC_MAX_TX_CNT_PER_WAKEUP		100
+#define ARPC_MAX_TX_CNT_PER_WAKEUP		32
 
 #define ARPC_CONN_EXIT_MAX_TIMES_MS	(2*1000)
 
@@ -90,6 +88,8 @@ struct arpc_connection_ctx {
 	uint32_t					msg_head_max_len;
 	uint64_t					msg_data_max_len;
 	uint32_t					msg_iov_max_len;
+	uint64_t					tx_count;
+	uint64_t					rx_count;
 	struct xio_connection		*xio_con;				/* connection 资源*/
 	struct xio_context			*xio_con_ctx;			/* context 资源*/
 	struct arpc_session_handle  *session;
@@ -594,7 +594,7 @@ exit_thread:
 	ctx->flags = 0;
 	prctl(PR_SET_NAME, "share_thread");
 	arpc_cond_notify(&ctx->cond);
-	ARPC_LOG_DEBUG("xio connection[%u] on thread[%lu] exit now.", con->id,  pthread_self());
+	ARPC_LOG_NOTICE("xio connection[%u] on thread[%lu] exit now.", con->id,  pthread_self());
 	arpc_cond_unlock(&ctx->cond);
 	return ARPC_SUCCESS;
 }
@@ -610,8 +610,9 @@ static void arpc_conn_event_callback(int fd, int events, void *data)
 	ret = arpc_cond_lock(&ctx->cond);
 	LOG_THEN_RETURN_VAL_IF_TRUE(ret, ;, "tx event  arpc_cond_lock fail.");
 	if (IS_SET(ctx->flags, ARPC_CONN_ATTR_EXIT|ARPC_CONN_ATTR_SET_EXIT)){
+		ARPC_LOG_NOTICE("conn context[%d] to exit", ctx->status);
 		if(ctx->xio_con_ctx){
-			ARPC_LOG_ERROR("xio stop loop: %p.", ctx->xio_con_ctx);
+			ARPC_LOG_NOTICE("xio stop loop: %p.", ctx->xio_con_ctx);
 			xio_context_stop_loop(ctx->xio_con_ctx);
 		}
 		arpc_cond_unlock(&ctx->cond);
@@ -621,7 +622,7 @@ static void arpc_conn_event_callback(int fd, int events, void *data)
 	switch (ctx->status)
 	{
 	case ARPC_CON_STA_CLEANUP:
-		ARPC_LOG_DEBUG("conn status[%d] to disconnect", ctx->status);
+		ARPC_LOG_NOTICE("conn status[%d] to disconnect", ctx->status);
 		if (ctx->xio_con) {
 			ret = xio_disconnect(ctx->xio_con);
 			if (ret) {
@@ -666,6 +667,7 @@ static void arpc_tx_event_callback(struct arpc_connection *usr_conn)
 			continue;
 		}
 		arpc_mutex_unlock(&con->msg_lock);
+		ARPC_LOG_TRACE("xio send msg on client, msg type:%d", msg->type);
 		switch (msg->type)
 		{
 			case ARPC_MSG_TYPE_REQ:
@@ -682,7 +684,7 @@ static void arpc_tx_event_callback(struct arpc_connection *usr_conn)
 				ARPC_LOG_ERROR("unkown msg type[%d]", msg->type);
 				break;
 		}
-
+		ARPC_LOG_TRACE("xio send msg end, msg type:%d", msg->type);
 		if(ret){
 			ARPC_LOG_ERROR("send msg[%d] fail, errno code[%u], err msg[%s].", msg->type, xio_errno(), xio_strerror(xio_errno()));
 			if(retry < 3){
@@ -777,6 +779,7 @@ int keep_conn_heartbeat(const struct arpc_connection *conn)
 	ret = arpc_cond_lock(&ctx->cond);
 	LOG_THEN_RETURN_VAL_IF_TRUE(ret, ARPC_ERROR, "arpc_cond_lock conn[%u][%p] fail.", conn->id, conn);
 	SET_FLAG(ctx->flags, ARPC_CONN_ATTR_TELL_LIVE);
+	ctx->rx_count++;
 	arpc_cond_unlock(&ctx->cond);
 	return 0;
 }
@@ -834,6 +837,8 @@ int arpc_connection_async_send(const struct arpc_connection *conn, struct arpc_c
 	
 	LOG_THEN_RETURN_VAL_IF_TRUE(!msg, ARPC_ERROR, "arpc_conn_ow_msg null.");
 
+	ARPC_LOG_TRACE("arpc commit tx msg, msg type:%d", msg->type);
+
 	ret = arpc_cond_lock(&ctx->cond);
 	LOG_THEN_RETURN_VAL_IF_TRUE(ret, ARPC_ERROR, "arpc_cond_lock conn[%u][%p] fail.", conn->id, conn);
 
@@ -863,6 +868,7 @@ int arpc_connection_async_send(const struct arpc_connection *conn, struct arpc_c
 	msg->status = ARPC_MSG_STATUS_TX;
 	QUEUE_INSERT_TAIL(&ctx->q_tx_msg, &msg->q);
 	ctx->tx_msg_num++;
+	ctx->tx_count++;
 	ctx->event_cnt++;
 	if (ctx->event_cnt > 500000) {
 		arpc_usleep(50);

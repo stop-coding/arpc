@@ -41,7 +41,7 @@ enum arpc_log_level{
 };
 void arpc_vlog(enum arpc_log_level level, const char *module, const char *file,unsigned line, const char *function, const char *fmt, ...);
 
-//#define BASE_DEBUG_ON
+
 #define BASE_LOG_ERROR(format, arg...) \
 		arpc_vlog(ARPC_LOG_LEVEL_E_ERROR, "ARPC", __FILE__, __LINE__, __FUNCTION__, format, ##arg);
 
@@ -51,16 +51,8 @@ void arpc_vlog(enum arpc_log_level level, const char *module, const char *file,u
 #define BASE_LOG_TRACE(format, arg...)\
 		arpc_vlog(ARPC_LOG_LEVEL_E_TRACE, "ARPC", __FILE__, __LINE__, __FUNCTION__, format, ##arg);
 
-//#define BASE_LOG_NOTICE(format, arg...)
-//#define BASE_LOG_ERROR(format, arg...) fprintf(stderr, 	"[ ARPC] [ ERROR] file:%s func: %s|%d---"format"\n", __FILE__, __FUNCTION__, __LINE__,##arg)
-//#define BASE_LOG_NOTICE(format, arg...) fprintf(stderr, "[ ARPC] [NOTICE] func: %s|%d---"format"\n",__FUNCTION__, __LINE__, ##arg)
-
-#ifdef BASE_DEBUG_ON
 #define BASE_LOG_DEBUG(format, arg...) \
 		arpc_vlog(ARPC_LOG_LEVEL_E_DEBUG, "ARPC", __FILE__, __LINE__, __FUNCTION__, format, ##arg);
-#else
-#define BASE_LOG_DEBUG(format, arg...)
-#endif
 
 #define unlikely(x)    __builtin_expect(!!(x), 0)
 

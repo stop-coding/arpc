@@ -65,14 +65,14 @@ int process_oneway_data(struct xio_msg *req, struct oneway_ops *ops, int last_in
 	ret = destroy_xio_msg_usr_buf(req, ops->free_cb, usr_ctx);
 	LOG_THEN_RETURN_VAL_IF_TRUE((ret), ARPC_ERROR, "destroy_xio_msg_usr_buf fail.");
 	if (IS_SET(req->usr_flags, METHOD_ARPC_PROC_SYNC) && ops->proc_data_cb) {
-		ARPC_LOG_DEBUG("set sync proc_data_cb data.");
+		ARPC_LOG_TRACE("process rx oneway msg with sync.");
 		ret = ops->proc_data_cb(&rev_iov, &flags, usr_ctx);
+		ARPC_LOG_TRACE("process rx oneway msg finished with sync, flag[0x%x].", flags);
 		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, free_data, "proc_data_cb  return fail.");
 
 		if(!IS_SET(flags, METHOD_CALLER_HIJACK_RX_DATA)){
 			free_msg_xio2arpc(&rev_iov, ops->free_cb, usr_ctx);
 		}
-		ARPC_LOG_TRACE("deel oneway msg data end");
 	}else {
 		ARPC_LOG_DEBUG("set proc_async_cb data.");
 		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!IS_SET(req->usr_flags, METHOD_ALLOC_DATA_BUF) && nents, 
@@ -117,13 +117,15 @@ static int oneway_msg_async_deal(void *usr_ctx)
 	LOG_THEN_RETURN_VAL_IF_TRUE(!async, ARPC_ERROR, "async null.");
 	LOG_THEN_RETURN_VAL_IF_TRUE(!async->ops.proc_oneway_async_cb, ARPC_ERROR, "proc_async_cb null.");
 
+	ARPC_LOG_TRACE("process rx oneway msg with async.");
 	ret = async->ops.proc_oneway_async_cb(&async->rev_iov, &flags, async->usr_ctx);
+	ARPC_LOG_TRACE("process rx oneway msg finished with async, flag[0x%x].", flags);
+
 	LOG_ERROR_IF_VAL_TRUE(ret, "proc_oneway_async_cb error.");
-	ARPC_LOG_TRACE("deel oneway msg data end");
 	if (!IS_SET(flags, METHOD_CALLER_HIJACK_RX_DATA)){
+		ARPC_LOG_DEBUG("free_msg_xio2arpc data.");
 		free_msg_xio2arpc(&async->rev_iov, async->ops.free_cb, async->usr_ctx);
 	}
-
 	// free
 	SAFE_FREE_MEM(async->rev_iov.head);
 	SAFE_FREE_MEM(async);

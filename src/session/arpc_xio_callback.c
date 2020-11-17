@@ -30,7 +30,7 @@ int msg_head_process(struct xio_session *session, struct xio_msg *msg, void *con
 {
 	int ret = 0;
 	ARPC_CONN_OPS_CTX(conn, conn_ops, conn_context);
-	ARPC_LOG_DEBUG("header message type:%d", msg->type);
+	ARPC_LOG_TRACE("rx header, message type:%d, head len:%u, data len:%lu", msg->type, (uint32_t)msg->in.header.iov_len, msg->in.total_data_len);
 	switch(msg->type) {
 		case XIO_MSG_TYPE_REQ:
 			ret = process_request_header(conn, msg, &conn_ops->req_ops, arpc_get_max_iov_len(conn), arpc_get_ops_ctx(conn));
@@ -53,7 +53,7 @@ int msg_data_process(struct xio_session *session,struct xio_msg *msg, int last_i
 	int ret = 0;
 	ARPC_CONN_OPS_CTX(conn, conn_ops, conn_context);
 
-	ARPC_LOG_DEBUG("msg_data_dispatch, msg type:%d", msg->type);
+	ARPC_LOG_TRACE("rx data, msg type:%d, head len:%u, data len:%lu", msg->type, (uint32_t)msg->in.header.iov_len, msg->in.total_data_len);
 	ret = keep_conn_heartbeat(conn);
 	LOG_THEN_RETURN_VAL_IF_TRUE(ret, -1, "keep_conn_heartbeat fail.");
 
@@ -90,6 +90,8 @@ int response_send_complete(struct xio_session *session,struct xio_msg *rsp, void
 	struct arpc_common_msg *com_msg;
 	ARPC_CONN_CTX(conn, conn_context);
 
+	ARPC_LOG_TRACE("send rsp msg complete.");
+
 	com_msg = (struct arpc_common_msg *)(rsp->user_context);
 
 	ret = arpc_connection_send_comp_notify(conn, com_msg);
@@ -110,6 +112,7 @@ static int on_msg_delivered(struct xio_session *session,
 	struct arpc_common_msg *com_msg;
 	ARPC_CONN_CTX(conn, conn_context);
 
+	ARPC_LOG_TRACE("send rsp msg delivered.");
 	com_msg = (struct arpc_common_msg *)(msg->user_context);
 
 	ret = arpc_connection_send_comp_notify(conn, com_msg);
@@ -129,6 +132,7 @@ int oneway_send_complete(struct xio_session *session, struct xio_msg *msg, void 
 	struct arpc_common_msg *com_msg;
 	ARPC_CONN_CTX(conn, conn_context);
 
+	ARPC_LOG_TRACE("send oneway msg complete.");
 	com_msg = (struct arpc_common_msg *)(msg->user_context);
 
 	ret = arpc_connection_send_comp_notify(conn, com_msg);
