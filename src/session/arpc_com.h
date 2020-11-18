@@ -279,6 +279,7 @@ struct arpc_common_msg {
 	enum	arpc_msg_type		type;
 	struct arpc_cond 			cond;				
 	const struct arpc_connection*conn;
+	struct xio_msg				xio_msg;
 	struct xio_msg				*tx_msg;
 	uint32_t 					retry_cnt;
     uint32_t                    flag;
@@ -288,7 +289,6 @@ struct arpc_common_msg {
 };
 
 struct arpc_oneway_handle {
-	struct xio_msg				x_req_msg;
     struct arpc_vmsg	        *send;
 	void 				        *send_ctx;
 	struct arpc_msg_attr        attr;
@@ -301,7 +301,6 @@ struct arpc_request_handle {
 };
 
 struct arpc_rsp_handle {
-	struct xio_msg				x_req_msg;
     struct xio_msg				*x_rsp_msg;
 	struct arpc_vmsg 			*rsp_usr_iov;
 	struct arpc_msg_attr		attr;

@@ -78,7 +78,7 @@ int arpc_init_response(struct arpc_common_msg *rsp_fd)
 	LOG_THEN_RETURN_VAL_IF_TRUE(!rsp_fd->conn, -1, "conn is null ,can't send user rsp data.");
 
 	rsp_fd_ex = (struct arpc_rsp_handle*)rsp_fd->ex_data;
-	rsp_msg = &rsp_fd_ex->x_req_msg;
+	rsp_msg = &rsp_fd->xio_msg;
 	rsp_iov = rsp_fd_ex->rsp_usr_iov;
 	rsp_fd->tx_msg = rsp_msg;
 	
@@ -119,7 +119,7 @@ int arpc_send_response_complete(struct arpc_common_msg *rsp_fd)
 	if (rsp_fd_ex->release_rsp_cb && rsp_fd_ex->rsp_usr_iov) {
 		rsp_fd_ex->release_rsp_cb(rsp_fd_ex->rsp_usr_iov, rsp_fd_ex->rsp_usr_ctx);
 	}
-	rsp_msg = &rsp_fd_ex->x_req_msg;
+	rsp_msg = &rsp_fd->xio_msg;
 	if(IS_SET(rsp_msg->usr_flags, XIO_MSG_FLAG_ALLOC_IOV_MEM) && rsp_msg->out.pdata_iov.sglist){
 		free_msg_arpc2xio(&rsp_msg->out);
 	}

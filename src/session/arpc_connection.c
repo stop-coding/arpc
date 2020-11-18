@@ -871,7 +871,6 @@ int arpc_connection_async_send(const struct arpc_connection *conn, struct arpc_c
 	ctx->tx_count++;
 	ctx->event_cnt++;
 	if (ctx->event_cnt > 500000) {
-		arpc_usleep(50);
 		ctx->event_cnt = 0;
 		(void)eventfd_read(ctx->event_fd, &event_val);
 	}
@@ -879,7 +878,7 @@ int arpc_connection_async_send(const struct arpc_connection *conn, struct arpc_c
 
 	ret = eventfd_write(ctx->event_fd, ARPC_CONN_EVENT_E_SEND_DATA);//触发发送事件
 	LOG_ERROR_IF_VAL_TRUE(ret < 0, "ret[%d], write fd[%d] fail", ret, ctx->event_fd);
-	sched_yield();//CPU让出来
+	//sched_yield();//CPU让出来
 
 	return ret;
 unlock:
@@ -1034,6 +1033,10 @@ void put_common_msg(struct arpc_common_msg *msg)
 	}
 	assert(msg->status == ARPC_MSG_STATUS_USED);
 	msg->status = ARPC_MSG_STATUS_IDLE;
+	msg->retry_cnt = 0;
+	msg->flag = 0;
+	msg->xio_msg.flags = 0;
+	memset(&msg->xio_msg, 0, sizeof(msg->xio_msg));
 	arpc_cond_unlock(&msg->cond);
 
 	ctx = (struct arpc_connection_ctx *)(msg->conn->ctx);

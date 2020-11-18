@@ -33,13 +33,12 @@ extern "C" {
 #endif
 
 struct arpc_msg_ex {
-    struct xio_msg				x_req_msg;
     struct xio_msg				*x_rsp_msg;
     struct arpc_msg             *msg;
     struct arpc_msg_attr        attr;
 	void* (*alloc_cb)(uint32_t size, void* usr_context);	/*! @brief 用于接收rsp消息时分配内存，可选 */
 	int   (*free_cb)(void* buf_ptr, void* usr_context);		/*! @brief 内存释放 可选*/
-	void 		*usr_context;								/*! @brief 用户上下文 */
+	void 		                *usr_context;				/*! @brief 用户上下文 */
     uint32_t                    flags;
     uint64_t                    iov_max_len;
 };

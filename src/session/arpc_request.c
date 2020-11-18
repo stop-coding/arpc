@@ -58,7 +58,7 @@ int arpc_do_request(const arpc_session_handle_t fd, struct arpc_msg *msg, int32_
 	req_fd->msg_ex = (struct arpc_msg_ex *)msg->handle;
 
 	ex_msg = req_fd->msg_ex;
-	req = &ex_msg->x_req_msg;
+	req = &req_msg->xio_msg;
 	req_msg->tx_msg = req;
 
 	ret = convert_msg_arpc2xio(&msg->send, &req->out, &ex_msg->attr);
@@ -143,7 +143,7 @@ int arpc_request_rsp_complete(struct arpc_common_msg *req_msg)
 			req_msg_ex->msg->proc_rsp_cb(&req_msg_ex->msg->receive, req_msg_ex->msg->receive_ctx);
 		}
 		arpc_cond_unlock(&req_msg->cond);
-		free_msg_arpc2xio(&req_msg_ex->msg_ex->x_req_msg.out);
+		free_msg_arpc2xio(&req_msg->xio_msg.out);
 		put_common_msg(req_msg);	//un lock
 	}else{
 		arpc_cond_notify(&req_msg->cond);
@@ -186,7 +186,7 @@ int arpc_send_oneway_msg(const arpc_session_handle_t fd, struct arpc_vmsg *send,
 	ow_msg->send = send;
 	ow_msg->clean_send_cb = clean_send;
 	ow_msg->send_ctx = send_ctx;
-	req = &ow_msg->x_req_msg;
+	req = &req_msg->xio_msg;
 	req_msg->tx_msg = req;
 	req_msg->type = ARPC_MSG_TYPE_OW;
 
@@ -249,7 +249,7 @@ int arpc_oneway_send_complete(struct arpc_common_msg *ow_msg)
 	if (ow_msg_ex->clean_send_cb){
 		ow_msg_ex->clean_send_cb(ow_msg_ex->send, ow_msg_ex->send_ctx);
 		arpc_cond_unlock(&ow_msg->cond);
-		free_msg_arpc2xio(&ow_msg_ex->x_req_msg.out);
+		free_msg_arpc2xio(&ow_msg->xio_msg.out);
 		put_common_msg(ow_msg);	//un lock
 	}else{
 		arpc_cond_notify(&ow_msg->cond);
