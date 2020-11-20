@@ -57,8 +57,12 @@ enum arpc_io_type{
 struct arpc_connection {
 	QUEUE 						q;
 	uint32_t					id;
-	uint64_t					tx_count;
-	uint64_t					rx_count;
+	uint64_t					tx_ow_count;
+	uint64_t					tx_req_count;
+	uint64_t					tx_rsp_count;
+	uint64_t					rx_ow_count;
+	uint64_t					rx_req_count;
+	uint64_t					rx_rsp_count;
 	struct timeval 				tx_interval;
 	struct statistics_data		tx_ow;
 	struct statistics_data		tx_req;
@@ -102,6 +106,7 @@ int arpc_set_disconnect_status(struct arpc_connection *con);
 struct arpc_session_ops *arpc_get_ops(struct arpc_connection *con);
 void *arpc_get_ops_ctx(struct arpc_connection *con);
 uint32_t arpc_get_max_iov_len(struct arpc_connection *con);
+enum arpc_connection_type arpc_get_conn_type(struct arpc_connection *con);
 
 int arpc_lock_connection(struct arpc_connection *con);
 int arpc_unlock_connection(struct arpc_connection *con);

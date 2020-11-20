@@ -165,8 +165,8 @@ static void *task_worker(void* arg) {
 
 		pthread_mutex_lock(&pool_ctx->mutex);
 		t_msg->run_count++;
-		statistics_per_time(&now, &t_msg->time, 2);
-		if (t_msg->interval.tv_sec + 30 <= now.tv_sec) {
+		statistics_per_time(&now, &t_msg->time, 5);
+		if (t_msg->interval.tv_sec + 2*STATISTICS_PRINT_INTERVAL_S <= now.tv_sec) {
 			t_msg->interval = now;
 			TP_LOG_NOTICE("### thread status ###:\n  # thread id[0x%lx][%d],\n  # run count:%lu,\n  # run ave:%lu.%06ld s.\n######\n", 
 							t_msg->thread_id, 

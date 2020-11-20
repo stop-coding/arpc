@@ -671,12 +671,15 @@ static void arpc_tx_event_callback(struct arpc_connection *usr_conn)
 		switch (msg->type)
 		{
 			case ARPC_MSG_TYPE_REQ:
+				usr_conn->tx_req_count++;
 				ret = xio_send_request(con->xio_con, msg->tx_msg);
 				break;
 			case ARPC_MSG_TYPE_RSP:
+				usr_conn->tx_rsp_count++;
 				ret = xio_send_response(msg->tx_msg);
 				break;
 			case ARPC_MSG_TYPE_OW:
+				usr_conn->tx_ow_count++;
 				ret = xio_send_msg(con->xio_con, msg->tx_msg);
 				break;
 			default:
@@ -870,7 +873,6 @@ int arpc_connection_async_send(const struct arpc_connection *conn, struct arpc_c
 	QUEUE_INSERT_TAIL(&ctx->q_tx_msg, &msg->q);
 	ctx->tx_msg_num++;
 	ctx->event_cnt++;
-	((struct arpc_connection*)conn)->tx_count++;
 	if (ctx->event_cnt > 500000) {
 		ctx->event_cnt = 0;
 		(void)eventfd_read(ctx->event_fd, &event_val);
@@ -883,12 +885,13 @@ int arpc_connection_async_send(const struct arpc_connection *conn, struct arpc_c
 
 	if (conn->tx_interval.tv_sec + STATISTICS_PRINT_INTERVAL_S <= msg->now.tv_sec) {
 		((struct arpc_connection*)conn)->tx_interval = msg->now;
-		ARPC_LOG_NOTICE("### send status ###\n  # conn id[%u],\n  # tx count:%lu,\n  # tx req ave:%lu.%06ld s,\n  # tx rsp ave:%lu.%06ld s,\n  # tx ow ave:%lu.%06ld s.\n  # wait tx cnt:%lu.\n  # busy msg cnt:%u.\n ######\n", 
+		ARPC_LOG_NOTICE("### send status ###\n  # session[%p],type[%d],conid[%u],\n  # tx req cnt:%lu|ave:%lu.%06ld s,\n  # tx rsp cnt:%lu|ave:%lu.%06ld s,\n  # tx ow cnt:%lu|ave:%lu.%06ld s.\n  # wait tx cnt:%lu.\n  # busy msg cnt:%u.\n ######\n", 
+						ctx->session,
+						ctx->type,
 						conn->id, 
-						conn->tx_count,
-						conn->tx_req.ave.tv_sec, conn->tx_req.ave.tv_usec,
-						conn->tx_rsp.ave.tv_sec, conn->tx_rsp.ave.tv_usec,
-						conn->tx_ow.ave.tv_sec, conn->tx_ow.ave.tv_usec,
+						conn->tx_req_count, conn->tx_req.ave.tv_sec, conn->tx_req.ave.tv_usec,
+						conn->tx_rsp_count, conn->tx_rsp.ave.tv_sec, conn->tx_rsp.ave.tv_usec,
+						conn->tx_ow_count, conn->tx_ow.ave.tv_sec, conn->tx_ow.ave.tv_usec,
 						ctx->tx_msg_num,
 						ctx->busy_msg);
 	}
@@ -959,6 +962,12 @@ uint32_t arpc_get_max_iov_len(struct arpc_connection *con)
 {
 	CONN_CTX(ctx, con, IOV_DEFAULT_MAX_LEN);
 	return ctx->msg_iov_max_len >8 ? ctx->msg_iov_max_len: IOV_DEFAULT_MAX_LEN;
+}
+
+enum arpc_connection_type arpc_get_conn_type(struct arpc_connection *con)
+{
+	CONN_CTX(ctx, con, ARPC_CON_TYPE_NONE);
+	return ctx->type;
 }
 
 static inline int alloc_common_msg(QUEUE* iter, uint32_t size, enum  arpc_msg_type type)
