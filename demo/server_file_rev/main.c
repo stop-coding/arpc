@@ -204,7 +204,7 @@ static int process_async(const struct arpc_vmsg *req_iov, struct arpc_rsp *rsp, 
 	}
 	rsp->rsp_iov = rsp_data;
 	rsp->flags = 0;
-	usleep(1000*((uint64_t)rsp_data %100));
+	//usleep(1000*((uint64_t)rsp_data %100));
 	return 0;
 }
 static int process_rx_oneway_data(const struct arpc_vmsg *req_iov, uint32_t *flags, void *usr_context)

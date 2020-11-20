@@ -157,7 +157,7 @@ static struct arpc_session_ops ops ={
 };
 
 static const char *g_filepath = NULL;
-static uint64_t g_file_size = 128*1024;
+static uint64_t g_file_size = 1024;
 int session_send_msg(arpc_session_handle_t session_fd, int32_t loop_time)
 {
 	uint32_t				i = 0;
@@ -224,8 +224,11 @@ int session_send_msg(arpc_session_handle_t session_fd, int32_t loop_time)
 	return 0;
 }
 
-#define MAX_THREADS 	4
+#define MAX_THREADS 	1
 #define MAX_LOOP_TIMES 	500000
+
+static uint32_t thread_num = 1;
+static uint32_t loop_times = 1000;
 
 static void *worker_thread(void *data)
 {
@@ -262,15 +265,21 @@ int main(int argc, char *argv[])
 	struct timeval start_now;
 	struct timeval end_now;
 
-	if (argc < 5) {
-		printf("Usage: %s <host> <port> <file path> <req data>. \n", argv[0]);
+	if (argc < 7) {
+		printf("Usage: %s <host> <port> <conn num> <thread num> <loop times> <per send size KB>. \n", argv[0]);
 		return 0;
 	}
 	arpc_cond_init(&g_cond);
 
-	printf("input:<%s> <%s> <%s> <%s>\n", argv[1], argv[2], argv[3], argv[4]);
+	printf("target:<%s> <%s>\n", argv[1], argv[2]);
+	printf("conn num: %s\n", argv[3]);
+	printf("thread num: %s\n", argv[4]);
+	printf("loop times: %s\n", argv[5]);
+	printf("per send size: %s KB\n", argv[6]);
 	
-	g_filepath = argv[3];
+	thread_num = atoi(argv[4]);
+	loop_times = atol(argv[5]);
+	g_file_size = atol(argv[6]) * 1024;
 
 	//SET_FLAG(opt.control, ARPC_E_CTRL_CRC); //开启通信CRC检查
 	opt.msg_iov_max_len = 4*1024;
@@ -281,9 +290,9 @@ int main(int argc, char *argv[])
 	param.con.type = ARPC_E_TRANS_TCP;
 	memcpy(param.con.ipv4.ip, argv[1], IPV4_MAX_LEN);
 	param.con.ipv4.port = atoi(argv[2]);
-	param.req_data = argv[4];
-	param.req_data_len = strlen(argv[4]);
-	param.con_num = 4;
+	param.req_data = NULL;
+	param.req_data_len = 0;
+	param.con_num = atoi(argv[3]);
 	param.rx_con_num = 0;
 	param.ops = &ops;
 	session_fd = arpc_client_create_session(&param);
@@ -315,7 +324,7 @@ int main(int argc, char *argv[])
 	printf("##### send total times:[%lu.%05lu s] .\n\n", end_now.tv_sec, end_now.tv_usec);
 	printf("\n\n################################################\n");
 	arpc_client_destroy_session(&session_fd);
-	printf("file send complete:%s.\n\n", g_filepath);
+
 end:
 	if (fp)
 		fclose(fp);

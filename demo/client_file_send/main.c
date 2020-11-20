@@ -246,7 +246,6 @@ int session_send_msg(arpc_session_handle_t session_fd)
 		}
 
 		// do request
-
 		ret = arpc_do_request(session_fd, request, 30*1000);
 		if (!ret){
 			for (i = 0; i < request->send.vec_num; i++) {
@@ -255,6 +254,7 @@ int session_send_msg(arpc_session_handle_t session_fd)
 				}
 			}
 			assert(strncmp(request->receive.head, (char*)buf_str, SHA256_BLOCK_SIZE*2) == 0);
+			printf("arpc_do_request success!!!\n");
 		}else{
 			printf("arpc_do_request fail\n");
 		}

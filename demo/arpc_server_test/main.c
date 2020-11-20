@@ -292,7 +292,7 @@ int main(int argc, char *argv[])
 	memcpy(param.con.ipv4.ip, argv[1], IPV4_MAX_LEN);
 	param.con.ipv4.port = atoi(argv[2]);
 
-	param.work_num = 16;
+	param.work_num = 8;
 	param.default_ops = ops;
 	param.new_session_start = &new_session_start;
 	param.new_session_end = &new_session_end;
