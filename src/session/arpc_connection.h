@@ -57,6 +57,17 @@ enum arpc_io_type{
 struct arpc_connection {
 	QUEUE 						q;
 	uint32_t					id;
+	uint64_t					tx_count;
+	uint64_t					rx_count;
+	struct timeval 				tx_interval;
+	struct statistics_data		tx_ow;
+	struct statistics_data		tx_req;
+	struct statistics_data		tx_rsp;
+	struct timeval 				rx_interval;
+	struct timeval 				rx_now;
+	struct statistics_data		rx_ow;
+	struct statistics_data		rx_req;
+	struct statistics_data		rx_rsp;
 	char						ctx[0];
 };
 

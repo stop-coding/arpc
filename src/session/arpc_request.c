@@ -61,6 +61,7 @@ int arpc_do_request(const arpc_session_handle_t fd, struct arpc_msg *msg, int32_
 	req = &req_msg->xio_msg;
 	req_msg->tx_msg = req;
 
+	req->in.sgl_type		= XIO_SGL_TYPE_IOV_PTR;
 	ret = convert_msg_arpc2xio(&msg->send, &req->out, &ex_msg->attr);
 	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, free_common_msg, "convert xio msg fail.");
 	req->user_context = req_msg;

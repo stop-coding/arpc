@@ -469,7 +469,6 @@ int move_msg_xio2arpc(struct xio_vmsg *xio_msg, struct arpc_vmsg *msg, struct ar
 	LOG_THEN_RETURN_VAL_IF_TRUE((!xio_msg), ARPC_ERROR, "xio_msg null, exit.");
 	LOG_THEN_RETURN_VAL_IF_TRUE((!msg), ARPC_ERROR, "msg null, exit.");
 	LOG_THEN_RETURN_VAL_IF_TRUE((!xio_msg->header.iov_base), ARPC_ERROR, "head null, exit.");
-
 	ret = unpack_msg_head((uint8_t *)xio_msg->header.iov_base, xio_msg->header.iov_len, &proto, &usr_addr, &msg->head_len);
 	if (ret){
 		msg->head_len = xio_msg->header.iov_len;

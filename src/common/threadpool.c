@@ -63,13 +63,17 @@ struct _work {
 	int (*loop)(void *usr_ctx);		/* 循环回调函数*/
 	void (*stop)(void *usr_ctx);		/* 停止循环回调函数*/
 	void *usr_ctx;						/* 任务上下文*/
+	struct timeval now;
 	pthread_t  thread_id;
 	WORK_PRIVATE_DATA;					/* 队列标识，内部使用，无需设置*/
 };
 
 struct _thread_msg{
     int32_t           work_id;
-    pthread_t         thread_id; 
+    pthread_t         thread_id;
+	struct timeval 	  interval;
+	uint64_t		  run_count;
+	struct statistics_data	time;
     uint32_t          flag;
 };
 
@@ -86,6 +90,7 @@ struct _thread_pool_msg{
 	char  				ext_data[0];				
 };
 
+
 /* To avoid deadlock with uv_cancel() it's crucial that the worker
  * never holds the global mutex and the loop-local mutex at the same time.
  */
@@ -93,7 +98,8 @@ static void *task_worker(void* arg) {
 	QUEUE* q;
 	struct _work *to_run;
 	struct _thread_msg  *t_msg;
-	cpu_set_t		cpuset;
+	//cpu_set_t		cpuset;
+	struct timeval now;
 	struct _thread_pool_msg* pool_ctx = (struct _thread_pool_msg*) arg;
 	LOG_THEN_RETURN_VAL_IF_TRUE((!pool_ctx), NULL, "pool_ctx empty fail.");
 
@@ -101,9 +107,9 @@ static void *task_worker(void* arg) {
 	t_msg = &pool_ctx->thread[pool_ctx->idle_num];
 	t_msg->work_id = pool_ctx->idle_num;
 
-	CPU_ZERO(&cpuset);
+	/*CPU_ZERO(&cpuset);
 	CPU_SET((pool_ctx->thread_num)%(pool_ctx->cpu_max_num), &cpuset);
-	pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset);
+	pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset);*/
 
 	prctl(PR_SET_NAME, "share_thread");
 
@@ -143,6 +149,8 @@ static void *task_worker(void* arg) {
 		to_run->loop(to_run->usr_ctx);
 		pthread_mutex_lock(&to_run->mutex);
 		to_run->thread_id = 0;
+		now = to_run->now;
+
 		if (IS_SET(to_run->flag, FLAG_WORK_WAIT)) {
 			CLR_FLAG(to_run->flag, FLAG_WORK_RUN);
 			SET_FLAG(to_run->flag, FLAG_WORK_DONE);
@@ -156,7 +164,18 @@ static void *task_worker(void* arg) {
 		}
 
 		pthread_mutex_lock(&pool_ctx->mutex);
-
+		t_msg->run_count++;
+		statistics_per_time(&now, &t_msg->time, 2);
+		if (t_msg->interval.tv_sec + 30 <= now.tv_sec) {
+			t_msg->interval = now;
+			TP_LOG_NOTICE("### thread status ###:\n  # thread id[0x%lx][%d],\n  # run count:%lu,\n  # run ave:%lu.%06ld s.\n######\n", 
+							t_msg->thread_id, 
+							t_msg->work_id,
+							t_msg->run_count,
+							t_msg->time.ave.tv_sec, t_msg->time.ave.tv_usec,
+							t_msg->time.ave.tv_sec, t_msg->time.ave.tv_usec,
+							t_msg->time.ave.tv_sec, t_msg->time.ave.tv_usec);
+		}
 	}
 	TASK_CLR_ACTIVE(t_msg->flag);
 	pthread_mutex_unlock(&pool_ctx->mutex);
@@ -306,10 +325,13 @@ work_handle_t tp_post_one_work(tp_handle fd, struct tp_thread_work *w, uint8_t a
   struct _thread_pool_msg *pool = (struct _thread_pool_msg *)fd;
   struct _work *work;
   int ret;
+  int i;
   LOG_THEN_RETURN_VAL_IF_TRUE((!pool || !w), NULL,"pool null or w null fail.");
   LOG_THEN_RETURN_VAL_IF_TRUE(!w->loop, NULL, "work loop null, fail.");
   
   work = (struct _work*)calloc(1, sizeof(struct _work));
+  gettimeofday(&work->now, NULL);	// 线程安全
+
   work->loop = w->loop;
   work->stop = w->stop;
   work->usr_ctx = w->usr_ctx;
@@ -332,6 +354,7 @@ work_handle_t tp_post_one_work(tp_handle fd, struct tp_thread_work *w, uint8_t a
   }else{
 	  TP_LOG_DEBUG("no idle thread to process task, idle:%u, total:%u.", pool->idle_num, pool->thread_num);
   }
+
   pthread_mutex_unlock(&pool->mutex);
   return work;
 error:

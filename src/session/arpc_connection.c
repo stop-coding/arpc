@@ -33,6 +33,7 @@
 
 #define ARPC_CONN_TX_MAX_DEPTH	  		500
 #define ARPC_MAX_TX_CNT_PER_WAKEUP		32
+#define COMM_MSG_GROW_STEP				64
 
 #define ARPC_CONN_EXIT_MAX_TIMES_MS	(2*1000)
 
@@ -88,8 +89,6 @@ struct arpc_connection_ctx {
 	uint32_t					msg_head_max_len;
 	uint64_t					msg_data_max_len;
 	uint32_t					msg_iov_max_len;
-	uint64_t					tx_count;
-	uint64_t					rx_count;
 	struct xio_connection		*xio_con;				/* connection 资源*/
 	struct xio_context			*xio_con_ctx;			/* context 资源*/
 	struct arpc_session_handle  *session;
@@ -105,6 +104,7 @@ struct arpc_connection_ctx {
 	int 						event_fd;
 	uint64_t					event_cnt;
 	uint64_t					tx_msg_num;
+	uint32_t					busy_msg;
 	struct arpc_mutex 			msg_lock;			/* 消息锁*/
 	QUEUE     					q_tx_msg;			/* 待发送队列*/							
 	QUEUE     					q_used_msg;			/* 被申请的队列*/
@@ -531,7 +531,7 @@ free_xio_ctx:
 static int arpc_client_run_loop(void * thread_ctx)
 {
 	struct arpc_connection *con = (struct arpc_connection *)thread_ctx;
-	cpu_set_t		cpuset;
+	//cpu_set_t		cpuset;
 	int ret;
 	char thread_name[16+1] ={0};
 	int64_t time_out_ms = XIO_INFINITE;
@@ -547,9 +547,9 @@ static int arpc_client_run_loop(void * thread_ctx)
 	ret = arpc_connect_init(con);
 	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, exit_thread, "arpc_connect_init fail.");
 
-	CPU_ZERO(&cpuset);
+	/*CPU_ZERO(&cpuset);
 	CPU_SET((con->id + 1)%(arpc_cpu_max_num()), &cpuset);
-	pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset);
+	pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset);*/
 
 	snprintf(thread_name, sizeof(thread_name), "arpc_conn_%d", con->id);
 	prctl(PR_SET_NAME, thread_name);
@@ -703,7 +703,7 @@ static void arpc_tx_event_callback(struct arpc_connection *usr_conn)
 		arpc_mutex_unlock(&con->msg_lock);
 		max_tx_send--;
 	}
-	
+
 	return;
 }
 
@@ -779,7 +779,6 @@ int keep_conn_heartbeat(const struct arpc_connection *conn)
 	ret = arpc_cond_lock(&ctx->cond);
 	LOG_THEN_RETURN_VAL_IF_TRUE(ret, ARPC_ERROR, "arpc_cond_lock conn[%u][%p] fail.", conn->id, conn);
 	SET_FLAG(ctx->flags, ARPC_CONN_ATTR_TELL_LIVE);
-	ctx->rx_count++;
 	arpc_cond_unlock(&ctx->cond);
 	return 0;
 }
@@ -839,6 +838,8 @@ int arpc_connection_async_send(const struct arpc_connection *conn, struct arpc_c
 
 	ARPC_LOG_TRACE("arpc commit tx msg, msg type:%d", msg->type);
 
+	gettimeofday(&msg->now, NULL);	// 线程安全
+
 	ret = arpc_cond_lock(&ctx->cond);
 	LOG_THEN_RETURN_VAL_IF_TRUE(ret, ARPC_ERROR, "arpc_cond_lock conn[%u][%p] fail.", conn->id, conn);
 
@@ -868,8 +869,8 @@ int arpc_connection_async_send(const struct arpc_connection *conn, struct arpc_c
 	msg->status = ARPC_MSG_STATUS_TX;
 	QUEUE_INSERT_TAIL(&ctx->q_tx_msg, &msg->q);
 	ctx->tx_msg_num++;
-	ctx->tx_count++;
 	ctx->event_cnt++;
+	((struct arpc_connection*)conn)->tx_count++;
 	if (ctx->event_cnt > 500000) {
 		ctx->event_cnt = 0;
 		(void)eventfd_read(ctx->event_fd, &event_val);
@@ -879,6 +880,18 @@ int arpc_connection_async_send(const struct arpc_connection *conn, struct arpc_c
 	ret = eventfd_write(ctx->event_fd, ARPC_CONN_EVENT_E_SEND_DATA);//触发发送事件
 	LOG_ERROR_IF_VAL_TRUE(ret < 0, "ret[%d], write fd[%d] fail", ret, ctx->event_fd);
 	//sched_yield();//CPU让出来
+
+	if (conn->tx_interval.tv_sec + STATISTICS_PRINT_INTERVAL_S <= msg->now.tv_sec) {
+		((struct arpc_connection*)conn)->tx_interval = msg->now;
+		ARPC_LOG_NOTICE("### send status ###\n  # conn id[%u],\n  # tx count:%lu,\n  # tx req ave:%lu.%06ld s,\n  # tx rsp ave:%lu.%06ld s,\n  # tx ow ave:%lu.%06ld s.\n  # wait tx cnt:%lu.\n  # busy msg cnt:%u.\n ######\n", 
+						conn->id, 
+						conn->tx_count,
+						conn->tx_req.ave.tv_sec, conn->tx_req.ave.tv_usec,
+						conn->tx_rsp.ave.tv_sec, conn->tx_rsp.ave.tv_usec,
+						conn->tx_ow.ave.tv_sec, conn->tx_ow.ave.tv_usec,
+						ctx->tx_msg_num,
+						ctx->busy_msg);
+	}
 
 	return ret;
 unlock:
@@ -929,7 +942,6 @@ int arpc_connection_send_comp_notify(const struct arpc_connection *conn, struct 
 	arpc_cond_notify(&ctx->cond);
 	arpc_cond_unlock(&ctx->cond);
 
-	put_common_msg(msg);
 	return 0;
 }
 
@@ -954,7 +966,7 @@ static inline int alloc_common_msg(QUEUE* iter, uint32_t size, enum  arpc_msg_ty
 	int i;
 	struct arpc_common_msg *req_msg = NULL;
 	if(QUEUE_EMPTY(iter)) {
-		for (i = 0; i < 64; i++) {
+		for (i = 0; i < COMM_MSG_GROW_STEP; i++) {
 			req_msg = arpc_create_common_msg(size);
 			LOG_THEN_RETURN_VAL_IF_TRUE(!req_msg, -1, "req_msg arpc_create_common_msg fail.");
 			req_msg->type = type;
@@ -1011,15 +1023,19 @@ struct arpc_common_msg *get_common_msg(const struct arpc_connection *conn, enum 
 		req_msg->status = ARPC_MSG_STATUS_USED;
 		req_msg->conn = conn;
 		QUEUE_INSERT_TAIL(&ctx->q_used_msg, &req_msg->q);
+		ctx->busy_msg++;
 	}
 	arpc_mutex_unlock(&ctx->msg_lock);
-
+	if (req_msg) {
+		memset(&req_msg->xio_msg, 0, sizeof(struct xio_msg));
+	}
+	
 	return req_msg;
 }
 
 void put_common_msg(struct arpc_common_msg *msg)
 {
-	const struct arpc_connection *conn;
+	struct arpc_connection *conn;
 	struct arpc_connection_ctx *ctx;
 	int ret;
 
@@ -1036,28 +1052,31 @@ void put_common_msg(struct arpc_common_msg *msg)
 	msg->retry_cnt = 0;
 	msg->flag = 0;
 	msg->xio_msg.flags = 0;
-	memset(&msg->xio_msg, 0, sizeof(msg->xio_msg));
 	arpc_cond_unlock(&msg->cond);
-
-	ctx = (struct arpc_connection_ctx *)(msg->conn->ctx);
+	conn = (struct arpc_connection *)msg->conn;
+	ctx = (struct arpc_connection_ctx *)(conn->ctx);
 	arpc_mutex_lock(&ctx->msg_lock);
 	QUEUE_REMOVE(&msg->q);
 	QUEUE_INIT(&msg->q);
 	switch (msg->type)
 	{
 	case ARPC_MSG_TYPE_REQ:
+		statistics_per_time(&msg->now, &conn->tx_req, 3);
 		QUEUE_INSERT_TAIL(&ctx->q_req_msg, &msg->q);
 		break;
 	case ARPC_MSG_TYPE_RSP:
+		statistics_per_time(&msg->now, &conn->tx_rsp, 3);
 		QUEUE_INSERT_TAIL(&ctx->q_rsp_msg, &msg->q);
 		break;
 	case ARPC_MSG_TYPE_OW:
+		statistics_per_time(&msg->now, &conn->tx_ow, 3);
 		QUEUE_INSERT_TAIL(&ctx->q_ow_msg, &msg->q);
 		break;
 	default:
 		ARPC_LOG_ERROR("unkown type");
 		break;
 	}
+	ctx->busy_msg--;
 	arpc_mutex_unlock(&ctx->msg_lock);
 	return;
 }

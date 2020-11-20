@@ -22,6 +22,8 @@
 #include <string.h>
 #include <stdlib.h>
 #include <syslog.h>
+#include <sys/time.h>
+#include <inttypes.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -95,6 +97,48 @@ do{\
 	}\
 }while(0);
 
+#define STATISTICS_PRINT_INTERVAL_S (5)
+
+struct statistics_data{
+	uint64_t cnt;
+	struct timeval cnt_time;
+	struct timeval start;
+	struct timeval ave;
+};
+
+
+static inline void statistics_per_time(const struct timeval *old, struct statistics_data *data, uint32_t interval_s) 
+{
+	struct timeval now;
+	uint64_t tmp;
+	struct timeval *total = &(data->cnt_time);
+
+	gettimeofday(&now, NULL);	// 线程安全
+	if(now.tv_sec > old->tv_sec){
+		total->tv_sec  += (now.tv_sec - old->tv_sec);
+		total->tv_usec += (now.tv_usec  + (1000000 - old->tv_usec));
+	}else if(now.tv_sec == old->tv_sec){
+		if (now.tv_usec  > old->tv_usec) {
+			total->tv_usec += (now.tv_usec  - old->tv_usec);
+		}
+	}
+	tmp = total->tv_usec / 1000000;
+	if(tmp){
+		total->tv_usec = total->tv_usec % 1000000;
+		total->tv_sec += tmp;
+	}
+	(data->cnt)++;
+
+	if (data->start.tv_sec + interval_s <= now.tv_sec) {
+		tmp = (total->tv_sec*1000000 + total->tv_usec)/data->cnt;
+		total->tv_sec = tmp/1000000;
+		total->tv_usec = tmp%1000000;
+		data->cnt = 1;
+		data->ave = data->cnt_time;
+		data->start = now;
+	}
+	return;
+}
 
 #ifdef __cplusplus
 }

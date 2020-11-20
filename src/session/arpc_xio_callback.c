@@ -31,6 +31,7 @@ int msg_head_process(struct xio_session *session, struct xio_msg *msg, void *con
 	int ret = 0;
 	ARPC_CONN_OPS_CTX(conn, conn_ops, conn_context);
 	ARPC_LOG_TRACE("rx header, message type:%d, head len:%u, data len:%lu", msg->type, (uint32_t)msg->in.header.iov_len, msg->in.total_data_len);
+	gettimeofday(&conn->rx_now, NULL);	// 线程安全
 	switch(msg->type) {
 		case XIO_MSG_TYPE_REQ:
 			ret = process_request_header(conn, msg, &conn_ops->req_ops, arpc_get_max_iov_len(conn), arpc_get_ops_ctx(conn));
@@ -52,30 +53,40 @@ int msg_data_process(struct xio_session *session,struct xio_msg *msg, int last_i
 {
 	int ret = 0;
 	ARPC_CONN_OPS_CTX(conn, conn_ops, conn_context);
-
 	ARPC_LOG_TRACE("rx data, msg type:%d, head len:%u, data len:%lu", msg->type, (uint32_t)msg->in.header.iov_len, msg->in.total_data_len);
 	ret = keep_conn_heartbeat(conn);
 	LOG_THEN_RETURN_VAL_IF_TRUE(ret, -1, "keep_conn_heartbeat fail.");
-
+	conn->rx_count++;
 	ret = check_xio_msg_valid(conn, &msg->in);
 	LOG_THEN_RETURN_VAL_IF_TRUE(ret, -1, "check_xio_msg_valid fail.");
 
 	switch(msg->type) {
 		case XIO_MSG_TYPE_REQ:
 			ret = process_request_data(conn, msg, &conn_ops->req_ops, last_in_rxq, arpc_get_ops_ctx(conn));
+			statistics_per_time(&conn->rx_now, &conn->rx_req, 1);
 			break;
 		case XIO_MSG_TYPE_RSP:
 			ret = process_rsp_data(msg, last_in_rxq, conn);
+			statistics_per_time(&conn->rx_now, &conn->rx_rsp, 1);
 			break;
 		case XIO_MSG_TYPE_ONE_WAY:
 			ret = set_connection_io_type(conn, ARPC_IO_TYPE_IN);
 			LOG_ERROR_IF_VAL_TRUE(ret, "set_connection_rx_mode fail.");
 			ret = process_oneway_data(msg, &conn_ops->oneway_ops, last_in_rxq, arpc_get_ops_ctx(conn));
+			statistics_per_time(&conn->rx_now, &conn->rx_ow, 1);
 			break;
 		default:
 			break;
 	}
-
+	if (conn->rx_interval.tv_sec + STATISTICS_PRINT_INTERVAL_S <= conn->rx_now.tv_sec) {
+		conn->rx_interval = conn->rx_now;
+		ARPC_LOG_NOTICE("### receive status ###:\n  # conn id[%u],\n  # rx count:%lu,\n  # rx req ave:%lu.%06ld s,\n  # rx rsp ave:%lu.%06ld s,\n  # rx ow ave:%lu.%06ld s.\n######\n", 
+						conn->id, 
+						conn->rx_count,
+						conn->rx_req.ave.tv_sec, conn->rx_req.ave.tv_usec,
+						conn->rx_rsp.ave.tv_sec, conn->rx_rsp.ave.tv_usec,
+						conn->rx_ow.ave.tv_sec, conn->rx_ow.ave.tv_usec);
+	}
 	return ret;
 }
 

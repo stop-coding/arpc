@@ -631,7 +631,7 @@ static void destroy_session_handle(QUEUE* session_q)
 static int xio_server_work_run(void * ctx)
 {
 	struct arpc_server_work *work = (struct arpc_server_work *)ctx;
-	cpu_set_t		cpuset;
+	//cpu_set_t		cpuset;
 	char thread_name[16+1] ={0};
 	LOG_THEN_RETURN_VAL_IF_TRUE(!work, ARPC_ERROR, "work null fail.");
 	ARPC_LOG_DEBUG("work run on the thread[%lu].", pthread_self());
@@ -641,9 +641,9 @@ static int xio_server_work_run(void * ctx)
 	snprintf(thread_name, sizeof(thread_name), "arpc_work_%d", work->affinity);
 	prctl(PR_SET_NAME, thread_name);
 
-	CPU_ZERO(&cpuset);
+	/*CPU_ZERO(&cpuset);
 	CPU_SET((work->affinity)%(arpc_cpu_max_num()), &cpuset);
-	pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset);
+	pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset);*/
 
 	arpc_cond_notify(&work->cond);
 	arpc_cond_unlock(&work->cond);

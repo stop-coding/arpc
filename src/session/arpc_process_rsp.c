@@ -44,14 +44,13 @@ int process_rsp_header(struct xio_msg *rsp, struct arpc_connection *con)
 	arpc_cond_unlock(&req_msg->cond);
 
 	ex_msg = ((struct arpc_request_handle *)req_msg->ex_data)->msg_ex;
-	ex_msg->x_rsp_msg = rsp;
 	head_ops.alloc_cb = ex_msg->alloc_cb;
 	head_ops.free_cb = ex_msg->free_cb;
 	head_ops.proc_head_cb = NULL;
 	if (ex_msg->iov_max_len) {
-		ret = create_xio_msg_usr_buf(ex_msg->x_rsp_msg, &head_ops, ex_msg->iov_max_len, ex_msg);//申请资源
+		ret = create_xio_msg_usr_buf(rsp, &head_ops, ex_msg->iov_max_len, ex_msg);//申请资源
 	}else{
-		ret = create_xio_msg_usr_buf(ex_msg->x_rsp_msg, &head_ops, arpc_get_max_iov_len(con), ex_msg);//申请资源
+		ret = create_xio_msg_usr_buf(rsp, &head_ops, arpc_get_max_iov_len(con), ex_msg);//申请资源
 	}
 	
 	if (!ret){

@@ -82,7 +82,6 @@ int arpc_init_response(struct arpc_common_msg *rsp_fd)
 	rsp_iov = rsp_fd_ex->rsp_usr_iov;
 	rsp_fd->tx_msg = rsp_msg;
 	
-	LOG_THEN_RETURN_VAL_IF_TRUE(!rsp_fd_ex->x_rsp_msg, -1, "x_rsp_msg is null ,can't send user rsp data.");
 	if(rsp_iov && rsp_iov->head && rsp_iov->head_len){
 		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!rsp_fd_ex->release_rsp_cb, rsp_default, "release_rsp_cb is null ,can't send user rsp data.");
 		ret = convert_msg_arpc2xio(rsp_iov, &rsp_msg->out, &rsp_fd_ex->attr);

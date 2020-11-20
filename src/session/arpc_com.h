@@ -284,6 +284,7 @@ struct arpc_common_msg {
 	uint32_t 					retry_cnt;
     uint32_t                    flag;
 	enum  arpc_msg_status		status;
+	struct timeval 				now;
 	void 		                *usr_context;				/*! @brief 用户上下文 */
     char                        ex_data[0];
 };
