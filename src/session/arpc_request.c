@@ -181,8 +181,6 @@ int arpc_send_oneway_msg(const arpc_session_handle_t fd, struct arpc_vmsg *send,
 	req_msg = get_common_msg(con, ARPC_MSG_TYPE_OW);
 	LOG_THEN_RETURN_VAL_IF_TRUE(!req_msg, ARPC_ERROR,"get_common_msg");
 
-	ARPC_LOG_DEBUG("new msg:%p.", req_msg);//
-
 	ow_msg = (struct arpc_oneway_handle*)req_msg->ex_data;
 	ow_msg->send = send;
 	ow_msg->clean_send_cb = clean_send;

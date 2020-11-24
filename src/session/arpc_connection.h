@@ -107,6 +107,7 @@ struct arpc_session_ops *arpc_get_ops(struct arpc_connection *con);
 void *arpc_get_ops_ctx(struct arpc_connection *con);
 uint32_t arpc_get_max_iov_len(struct arpc_connection *con);
 enum arpc_connection_type arpc_get_conn_type(struct arpc_connection *con);
+struct arpc_session_handle *arpc_get_conn_session(struct arpc_connection *con);
 
 int arpc_lock_connection(struct arpc_connection *con);
 int arpc_unlock_connection(struct arpc_connection *con);

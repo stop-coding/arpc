@@ -83,7 +83,7 @@ int msg_data_process(struct xio_session *session,struct xio_msg *msg, int last_i
 	if (conn->rx_interval.tv_sec + STATISTICS_PRINT_INTERVAL_S <= conn->rx_now.tv_sec) {
 		conn->rx_interval = conn->rx_now;
 		ARPC_LOG_NOTICE("### receive status ###:\n  # session[%p],type[%d],conid[%u],\n  # rx req cnt:%lu|ave:%lu.%06ld s,\n  # rx rsp cnt:%lu|ave:%lu.%06ld s,\n  # rx ow cnt:%lu|ave:%lu.%06ld s.\n######\n", 
-						session,
+						arpc_get_conn_session(conn),
 						arpc_get_conn_type(conn),
 						conn->id,
 						conn->rx_req_count, conn->rx_req.ave.tv_sec, conn->rx_req.ave.tv_usec,

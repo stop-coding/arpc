@@ -964,6 +964,12 @@ uint32_t arpc_get_max_iov_len(struct arpc_connection *con)
 	return ctx->msg_iov_max_len >8 ? ctx->msg_iov_max_len: IOV_DEFAULT_MAX_LEN;
 }
 
+struct arpc_session_handle *arpc_get_conn_session(struct arpc_connection *con)
+{
+	CONN_CTX(ctx, con, NULL);
+	return ctx->session;
+}
+
 enum arpc_connection_type arpc_get_conn_type(struct arpc_connection *con)
 {
 	CONN_CTX(ctx, con, ARPC_CON_TYPE_NONE);

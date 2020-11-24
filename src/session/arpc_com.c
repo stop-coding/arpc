@@ -325,12 +325,13 @@ int create_xio_msg_usr_buf(struct xio_msg *msg, struct proc_header_func *ops, ui
 			return ARPC_ERROR;
 		}
 	}
+	msg->usr_flags = flag;
+	ARPC_LOG_DEBUG("flag:0x%x, data len:%lu", flag, msg->in.total_data_len);
 	if (!msg->in.total_data_len){
+		CLR_FLAG(msg->usr_flags, METHOD_ALLOC_DATA_BUF);
 		ARPC_LOG_DEBUG("discard data, total_data_len[%lu].", msg->in.total_data_len);
 		return ARPC_ERROR;
 	}
-	ARPC_LOG_DEBUG("flag:0x%x, data len:%lu", flag, msg->in.total_data_len);
-	msg->usr_flags = flag;
 	// alloc data buf form user define call back
 	/*if (!IS_SET(msg->usr_flags, METHOD_ALLOC_DATA_BUF)) {
 		ARPC_LOG_ERROR("not need alloc data buf.");
