@@ -50,6 +50,9 @@ struct arpc_session_handle *arpc_create_session(enum arpc_session_type type, uin
 	ret = arpc_cond_init(&session->cond); /* 初始化信号锁 */
 	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, free_buf, "arpc_cond_init fail.");
 
+	ret = arpc_mutex_init(&session->lock); /* 初始化信号锁 */
+	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, free_buf, "arpc_mutex_init fail.");
+
 	QUEUE_INIT(&session->q);
 	QUEUE_INIT(&session->q_con);
 	session->threadpool = arpc_get_threadpool();
@@ -120,6 +123,9 @@ int arpc_destroy_session(struct arpc_session_handle* session, int64_t timeout_ms
 
 	ret = arpc_cond_destroy(&session->cond);
 	LOG_ERROR_IF_VAL_TRUE(ret, "arpc_cond_destroy fail.");
+
+	ret = arpc_mutex_destroy(&session->lock);
+	LOG_ERROR_IF_VAL_TRUE(ret, "arpc_mutex_destroy fail.");
 
 	SAFE_FREE_MEM(session);
 	return 0;
@@ -391,10 +397,14 @@ int session_get_idle_conn(struct arpc_session_handle *session, struct arpc_conne
 
 	LOG_THEN_RETURN_VAL_IF_TRUE(!session, ARPC_ERROR, "session is null.");
 
+	ret = arpc_mutex_lock(&session->lock);
+	LOG_THEN_RETURN_VAL_IF_TRUE(ret, ARPC_ERROR, "arpc_mutex_lock session[%p] fail.", session);
+
 	ret = arpc_cond_lock(&session->cond);
 	LOG_THEN_RETURN_VAL_IF_TRUE(ret, ARPC_ERROR, "arpc_mutex_lock session[%p] fail.", session);
 	if (session->type == ARPC_SESSION_CLIENT && session->status == ARPC_SES_STA_CLOSE
 		&& IS_SET(session->flags, ARPC_SESSION_ATTR_AUTO_DISCONNECT)) {
+		ARPC_LOG_NOTICE("session[%p] close down[%d], try to reconnection", session, session->status);
 		ret = session_client_connect(session, timeout_ms);
 		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, unlock,"session_client_connect fail");
 	}
@@ -428,9 +438,11 @@ int session_get_idle_conn(struct arpc_session_handle *session, struct arpc_conne
 		}
 	}
 	arpc_cond_unlock(&session->cond);
+	arpc_mutex_unlock(&session->lock);
 	*conn = con;
 	return (*conn)?0:ARPC_ERROR;
 unlock:
 	arpc_cond_unlock(&session->cond);
+	arpc_mutex_unlock(&session->lock);
 	return ARPC_ERROR;
 }
