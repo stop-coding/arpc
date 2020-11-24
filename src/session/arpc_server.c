@@ -391,7 +391,7 @@ static int server_on_new_session(struct xio_session *session,struct xio_new_sess
 	LOG_ERROR_IF_VAL_TRUE(ret, "server_insert_session fail.");
 	server_fd->new_session_end((arpc_session_handle_t)new_session, &param, server_fd->usr_context);
 	
-	ARPC_LOG_NOTICE("create new session[%p] success, client[%s:%u].", server_fd, ipv4->ipv4.ip, ipv4->ipv4.port);
+	ARPC_LOG_NOTICE("create new session[%p] success, client[%s:%u].", new_session, ipv4->ipv4.ip, ipv4->ipv4.port);
 	return 0;
 reject:
 	if(new_session)
