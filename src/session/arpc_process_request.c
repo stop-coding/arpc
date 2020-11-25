@@ -156,6 +156,7 @@ static int request_msg_async_deal(void *usr_ctx)
 
 	rsp_fd_ex = (struct arpc_rsp_handle*)rsp_fd->ex_data;
 	rsp_fd_ex->rsp_usr_iov = rsp.rsp_iov;
+	rsp_fd_ex->rsp_usr_ctx = rsp.rsp_ctx;
 	rsp_fd_ex->release_rsp_cb = async->ops.release_rsp_cb;
 
 	if (!IS_SET(rsp.flags, METHOD_CALLER_ASYNC)) {
