@@ -39,6 +39,7 @@ enum arpc_log_level{
 	ARPC_LOG_LEVEL_E_INFO,
 	ARPC_LOG_LEVEL_E_DEBUG,
 	ARPC_LOG_LEVEL_E_TRACE,
+	ARPC_LOG_LEVEL_E_STATUS,
 	ARPC_LOG_LEVEL_E_MAX,
 };
 void arpc_vlog(enum arpc_log_level level, const char *module, const char *file,unsigned line, const char *function, const char *fmt, ...);
@@ -55,6 +56,9 @@ void arpc_vlog(enum arpc_log_level level, const char *module, const char *file,u
 
 #define BASE_LOG_DEBUG(format, arg...) \
 		arpc_vlog(ARPC_LOG_LEVEL_E_DEBUG, "ARPC", __FILE__, __LINE__, __FUNCTION__, format, ##arg);
+
+#define BASE_LOG_STATUS(format, arg...) \
+		arpc_vlog(ARPC_LOG_LEVEL_E_STATUS, "ARPC", __FILE__, __LINE__, __FUNCTION__, format, ##arg);
 
 #define unlikely(x)    __builtin_expect(!!(x), 0)
 
@@ -101,9 +105,10 @@ do{\
 
 struct statistics_data{
 	uint64_t cnt;
-	struct timeval cnt_time;
+	struct timeval cur;
 	struct timeval start;
 	struct timeval ave;
+	struct timeval total;
 };
 
 
@@ -111,30 +116,31 @@ static inline void statistics_per_time(const struct timeval *old, struct statist
 {
 	struct timeval now;
 	uint64_t tmp;
-	struct timeval *total = &(data->cnt_time);
+	struct timeval *total = &(data->total);
+	struct timeval *cur = &(data->cur);
 
-	gettimeofday(&now, NULL);	// 线程安全
-	if(now.tv_sec > old->tv_sec){
-		total->tv_sec  += (now.tv_sec - old->tv_sec);
-		total->tv_usec += (now.tv_usec  + (1000000 - old->tv_usec));
-	}else if(now.tv_sec == old->tv_sec){
-		if (now.tv_usec  > old->tv_usec) {
-			total->tv_usec += (now.tv_usec  - old->tv_usec);
-		}
+	if (!old->tv_sec) {
+		return;
 	}
-	tmp = total->tv_usec / 1000000;
-	if(tmp){
+	gettimeofday(&now, NULL);	// 线程安全
+
+	tmp = (now.tv_sec - old->tv_sec)*1000000 + now.tv_usec - old->tv_usec;
+	cur->tv_sec  = tmp/1000000;
+	cur->tv_usec = tmp%1000000;
+
+	total->tv_sec  += cur->tv_sec;
+	total->tv_usec += cur->tv_usec;
+
+	if(total->tv_usec/1000000){
+		total->tv_sec += total->tv_usec / 1000000;
 		total->tv_usec = total->tv_usec % 1000000;
-		total->tv_sec += tmp;
 	}
 	(data->cnt)++;
 
 	if (data->start.tv_sec + interval_s <= now.tv_sec) {
 		tmp = (total->tv_sec*1000000 + total->tv_usec)/data->cnt;
-		total->tv_sec = tmp/1000000;
-		total->tv_usec = tmp%1000000;
-		data->cnt = 1;
-		data->ave = data->cnt_time;
+		data->ave.tv_sec = tmp/1000000;
+		data->ave.tv_usec = tmp%1000000;
 		data->start = now;
 	}
 	return;

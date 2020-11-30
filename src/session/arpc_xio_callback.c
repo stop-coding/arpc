@@ -29,18 +29,18 @@
 int msg_head_process(struct xio_session *session, struct xio_msg *msg, void *conn_context)
 {
 	int ret = 0;
-	ARPC_CONN_OPS_CTX(conn, conn_ops, conn_context);
+	ARPC_CONN_CTX(conn, conn_context);
 	ARPC_LOG_TRACE("rx header, message type:%d, head len:%u, data len:%lu", msg->type, (uint32_t)msg->in.header.iov_len, msg->in.total_data_len);
 	gettimeofday(&conn->rx_now, NULL);	// 线程安全
 	switch(msg->type) {
 		case XIO_MSG_TYPE_REQ:
-			ret = process_request_header(conn, msg, &conn_ops->req_ops, arpc_get_max_iov_len(conn), arpc_get_ops_ctx(conn));
+			ret = process_request_header(conn, msg);
 			break;
 		case XIO_MSG_TYPE_RSP:
-			ret = process_rsp_header(msg, conn);
+			ret = process_rsp_header(conn, msg);
 			break;
 		case XIO_MSG_TYPE_ONE_WAY:
-			ret = process_oneway_header(msg, &conn_ops->oneway_ops, arpc_get_max_iov_len(conn), arpc_get_ops_ctx(conn));
+			ret = process_oneway_header(conn, msg);
 			break;  
 		default:
 			break;
@@ -52,7 +52,8 @@ int msg_head_process(struct xio_session *session, struct xio_msg *msg, void *con
 int msg_data_process(struct xio_session *session,struct xio_msg *msg, int last_in_rxq, void *conn_context)
 {
 	int ret = 0;
-	ARPC_CONN_OPS_CTX(conn, conn_ops, conn_context);
+	struct arpc_session_handle *arpc_ses;
+	ARPC_CONN_CTX(conn, conn_context);
 	ARPC_LOG_TRACE("rx data, msg type:%d, head len:%u, data len:%lu", msg->type, (uint32_t)msg->in.header.iov_len, msg->in.total_data_len);
 	ret = keep_conn_heartbeat(conn);
 	LOG_THEN_RETURN_VAL_IF_TRUE(ret, -1, "keep_conn_heartbeat fail.");
@@ -62,34 +63,27 @@ int msg_data_process(struct xio_session *session,struct xio_msg *msg, int last_i
 	switch(msg->type) {
 		case XIO_MSG_TYPE_REQ:
 			conn->rx_req_count++;
-			ret = process_request_data(conn, msg, &conn_ops->req_ops, last_in_rxq, arpc_get_ops_ctx(conn));
-			statistics_per_time(&conn->rx_now, &conn->rx_req, 1);
+			ret = process_request_data(conn, msg, last_in_rxq);
+			statistics_per_time(&conn->rx_now, &conn->rx_req, 5);
 			break;
 		case XIO_MSG_TYPE_RSP:
 			conn->rx_rsp_count++;
-			ret = process_rsp_data(msg, last_in_rxq, conn);
-			statistics_per_time(&conn->rx_now, &conn->rx_rsp, 1);
+			ret = process_rsp_data(conn, msg, last_in_rxq);
+			statistics_per_time(&conn->rx_now, &conn->rx_rsp, 5);
 			break;
 		case XIO_MSG_TYPE_ONE_WAY:
 			conn->rx_ow_count++;
-			ret = set_connection_io_type(conn, ARPC_IO_TYPE_IN);
-			LOG_ERROR_IF_VAL_TRUE(ret, "set_connection_rx_mode fail.");
-			ret = process_oneway_data(msg, &conn_ops->oneway_ops, last_in_rxq, arpc_get_ops_ctx(conn));
-			statistics_per_time(&conn->rx_now, &conn->rx_ow, 1);
+			if (arpc_get_conn_type(conn) == ARPC_CON_TYPE_SERVER) {
+				ret = set_connection_io_type(conn, ARPC_IO_TYPE_IN);
+				LOG_ERROR_IF_VAL_TRUE(ret, "set_connection_rx_mode fail.");
+			}
+			ret = process_oneway_data(conn, msg, last_in_rxq);
+			statistics_per_time(&conn->rx_now, &conn->rx_ow, 5);
 			break;
 		default:
 			break;
 	}
-	if (conn->rx_interval.tv_sec + STATISTICS_PRINT_INTERVAL_S <= conn->rx_now.tv_sec) {
-		conn->rx_interval = conn->rx_now;
-		ARPC_LOG_NOTICE("### receive status ###:\n  # session[%p],type[%d],conid[%u],\n  # rx req cnt:%lu|ave:%lu.%06ld s,\n  # rx rsp cnt:%lu|ave:%lu.%06ld s,\n  # rx ow cnt:%lu|ave:%lu.%06ld s.\n######\n", 
-						arpc_get_conn_session(conn),
-						arpc_get_conn_type(conn),
-						conn->id,
-						conn->rx_req_count, conn->rx_req.ave.tv_sec, conn->rx_req.ave.tv_usec,
-						conn->rx_rsp_count, conn->rx_rsp.ave.tv_sec, conn->rx_rsp.ave.tv_usec,
-						conn->rx_ow_count, conn->rx_ow.ave.tv_sec, conn->rx_ow.ave.tv_usec);
-	}
+	print_session_status(arpc_get_conn_session(conn), &(conn->rx_now));
 	return ret;
 }
 

@@ -55,7 +55,7 @@ struct arpc_session_handle *arpc_create_session(enum arpc_session_type type, uin
 
 	QUEUE_INIT(&session->q);
 	QUEUE_INIT(&session->q_con);
-	session->threadpool = arpc_get_threadpool();
+	session->threadpool = NULL;
 	session->type = type;
 	session->is_close = 0;
 	session->status = ARPC_SES_STA_INIT;
@@ -240,7 +240,7 @@ int session_rebuild_for_client(struct arpc_session_handle *session)
 	thread.stop = NULL;
 	thread.usr_ctx = (void*)session;
 
-	thread_handle = tp_post_one_work(arpc_get_threadpool(), &thread, WORK_DONE_AUTO_FREE);
+	thread_handle = tp_post_one_work(session->threadpool, &thread, WORK_DONE_AUTO_FREE);
 	LOG_THEN_RETURN_VAL_IF_TRUE(!thread_handle, ARPC_ERROR, "tp_post_one_work fail.");
 	return 0;
 }
@@ -446,3 +446,63 @@ unlock:
 	arpc_mutex_unlock(&session->lock);
 	return ARPC_ERROR;
 }
+
+static inline const char *get_type_str(enum arpc_session_type type)
+{
+	static const  char *server = "server";
+	static const  char *client = "client";
+	static const  char *none = "unkown type";
+	if(type == ARPC_SESSION_SERVER){
+		return server;
+	}
+	if(type == ARPC_SESSION_CLIENT){
+		return client;
+	}
+	return none;
+}
+
+#define SESSION_STATUS_SHOW_HEAD\
+ "\n  ### session:%p   session type:%s  conn-num:%u  timeout-ms:%d  status:%d  data-max:%lu head-max:%u iov-max:%u ###\n"\
+ "*conn-id     "\
+ "*tx-req:cnt/cmit/send        *tx-rsp:cnt/cmit/send        *tx-ow:cnt/cmit/send         "\
+ "*rx-req:cnt/rx  /cb          *rx-rsp:cnt/rx  /cb          *rx-ow:cnt/rx  /cb   \n"
+
+#define SESSION_STATUS_SHOW\
+ "%-4u  %8lu|%02lu.%06lu|%02lu.%06lu %8lu|%02lu.%06lu|%02lu.%06lu %8lu|%02lu.%06lu|%02lu.%06lu %8lu|%02lu.%06lu|%02lu.%06lu %8lu|%02lu.%06lu|%02lu.%06lu %8lu|%02lu.%06lu|%02lu.%06lu\n" 
+
+void print_session_status(struct arpc_session_handle *session, struct timeval *now)
+{
+	int ret;
+	QUEUE* iter;
+	int try_time = 0;
+	struct arpc_connection *con = NULL;
+	if (!session || !now) {
+		return;
+	}
+
+	if ((session->interval.tv_sec + 3 >= now->tv_sec)) {
+		return;
+	}
+
+	ret = arpc_cond_lock(&session->cond);
+	LOG_THEN_RETURN_VAL_IF_TRUE(ret, ;, "arpc_mutex_lock session[%p] fail.", session);
+	session->interval = *now;
+	ARPC_LOG_STATUS(SESSION_STATUS_SHOW_HEAD, session, get_type_str(session->type), session->conn_num, 
+					session->conn_timeout_ms, session->status,
+					session->msg_data_max_len, session->msg_head_max_len, session->msg_iov_max_len);
+	QUEUE_FOREACH_VAL(&session->q_con, iter,
+	{
+		con = QUEUE_DATA(iter, struct arpc_connection, q);
+		ARPC_LOG_STATUS(SESSION_STATUS_SHOW, 
+						con->id,
+						con->tx_req_count, con->tx_req_cmit.ave.tv_sec, con->tx_req_cmit.ave.tv_usec, con->tx_req.ave.tv_sec, con->tx_req.ave.tv_usec,
+						con->tx_rsp_count, con->tx_rsp_cmit.ave.tv_sec, con->tx_rsp_cmit.ave.tv_usec, con->tx_rsp.ave.tv_sec, con->tx_rsp.ave.tv_usec,
+						con->tx_ow_count, con->tx_ow_cmit.ave.tv_sec, con->tx_ow_cmit.ave.tv_usec, con->tx_ow.ave.tv_sec, con->tx_ow.ave.tv_usec,
+						con->rx_req_count, con->rx_req_send.ave.tv_sec, con->rx_req_send.ave.tv_usec, con->rx_req.ave.tv_sec, con->rx_req.ave.tv_usec,
+						con->rx_rsp_count, con->rx_rsp_send.ave.tv_sec, con->rx_rsp_send.ave.tv_usec, con->rx_rsp.ave.tv_sec, con->rx_rsp.ave.tv_usec,
+						con->rx_ow_count, con->rx_ow_send.ave.tv_sec, con->rx_ow_send.ave.tv_usec, con->rx_ow.ave.tv_sec, con->rx_ow.ave.tv_usec);
+	});
+	ARPC_LOG_STATUS("-----------------------------------------------\n\n");
+	arpc_cond_unlock(&session->cond);
+	return;
+} 

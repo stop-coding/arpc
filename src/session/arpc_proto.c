@@ -293,20 +293,40 @@ int32_t unpack_new_session(const uint8_t *buffer, const uint32_t bufflen, struct
 	index += arpc_read_uint32(&proto->max_iov_len, index, buffer);
 	return index;
 }
+
 int32_t pack_msg_attr(const struct arpc_msg_attr *proto, uint8_t *buffer, uint32_t bufflen)
 {
 	int32_t index = 0;
 	LOG_THEN_RETURN_VAL_IF_TRUE(bufflen < sizeof(struct arpc_msg_attr), ARPC_ERROR, "buf invalid.");
 	index += arpc_write_uint64(proto->req_crc, index, buffer);
 	index += arpc_write_uint64(proto->rsp_crc, index, buffer);
+	index += arpc_write_uint64(proto->tx_sec, index, buffer);
+	index += arpc_write_uint64(proto->tx_usec, index, buffer);
+	index += arpc_write_uint32(proto->iovec_num, index, buffer);
+	index += arpc_write_uint32(proto->conn_id, index, buffer);
 	return index;
 }
 int32_t unpack_msg_attr(const uint8_t *buffer, const uint32_t bufflen, struct arpc_msg_attr *proto)
 {
 	int32_t index = 0;
-	LOG_THEN_RETURN_VAL_IF_TRUE(bufflen < sizeof(struct arpc_msg_attr), ARPC_ERROR, "struct error.");
+	if(index + 8 > bufflen)return index;
 	index += arpc_read_uint64(&proto->req_crc, index, buffer);
+
+	if(index + 8 > bufflen)return index;
 	index += arpc_read_uint64(&proto->rsp_crc, index, buffer);
+
+	if(index + 8 > bufflen)return index;
+	index += arpc_read_uint64(&proto->tx_sec, index, buffer);
+
+	if(index + 8 > bufflen)return index;
+	index += arpc_read_uint64(&proto->tx_usec, index, buffer);
+
+	if(index + 4 > bufflen)return index;
+	index += arpc_read_uint32(&proto->iovec_num, index, buffer);
+
+	if(index + 4 > bufflen)return index;
+	index += arpc_read_uint32(&proto->conn_id, index, buffer);
+
 	return index;
 }
 

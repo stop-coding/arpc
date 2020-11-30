@@ -87,6 +87,10 @@ PACKED_MEMORY(struct arpc_msg_attr
 {
 	uint64_t req_crc;
 	uint64_t rsp_crc;
+	uint64_t tx_sec;
+	uint64_t tx_usec;
+	uint32_t iovec_num;
+	uint32_t conn_id;
 });
 
 int32_t pack_msg_attr(const struct arpc_msg_attr *proto, uint8_t *buffer, uint32_t bufflen);

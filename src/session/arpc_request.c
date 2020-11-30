@@ -43,8 +43,11 @@ int arpc_do_request(const arpc_session_handle_t fd, struct arpc_msg *msg, int32_
 	struct arpc_connection *con = NULL;
 	struct arpc_msg_ex *ex_msg;
 	struct arpc_request_handle *req_fd;
+	struct timeval now;
 
 	LOG_THEN_RETURN_VAL_IF_TRUE((!session_ctx || !msg ), ARPC_ERROR, "arpc_session_handle_t fd null, exit.");
+
+	gettimeofday(&now, NULL);	// 线程安全
 
 	ret = session_get_idle_conn(session_ctx, &con, ARPC_MSG_TYPE_REQ, timeout_ms);
 	LOG_THEN_RETURN_VAL_IF_TRUE(!con, ARPC_ERROR,"session_get_idle_conn fail");
@@ -52,6 +55,11 @@ int arpc_do_request(const arpc_session_handle_t fd, struct arpc_msg *msg, int32_
 	req_msg = get_common_msg(con, ARPC_MSG_TYPE_REQ);
 	LOG_THEN_RETURN_VAL_IF_TRUE(!req_msg, ARPC_ERROR,"get_common_msg");
 
+	req_msg->now = now;
+	req_msg->attr.tx_sec= now.tv_sec;
+	req_msg->attr.tx_usec= now.tv_usec;
+	req_msg->attr.conn_id = con->id;
+	req_msg->attr.iovec_num = con->id;
 	req_fd = (struct arpc_request_handle*)req_msg->ex_data;
 
 	req_fd->msg = msg;
@@ -62,15 +70,12 @@ int arpc_do_request(const arpc_session_handle_t fd, struct arpc_msg *msg, int32_
 	req_msg->tx_msg = req;
 
 	req->in.sgl_type		= XIO_SGL_TYPE_IOV_PTR;
-	ret = convert_msg_arpc2xio(&msg->send, &req->out, &ex_msg->attr);
+	ret = convert_msg_arpc2xio(&msg->send, &req->out, &req_msg->attr);
 	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, free_common_msg, "convert xio msg fail.");
 	req->user_context = req_msg;
 	ex_msg = (struct arpc_msg_ex *)msg->handle;
 
 	send_cnt = 0;
-	if (!msg->proc_rsp_cb){
-		req->flags |= XIO_MSG_FLAG_IMM_SEND_COMP;
-	}
 	arpc_cond_lock(&req_msg->cond);
 	while(send_cnt < 1) {
 		send_cnt++;
@@ -170,9 +175,12 @@ int arpc_send_oneway_msg(const arpc_session_handle_t fd, struct arpc_vmsg *send,
 	struct arpc_oneway_handle *ow_msg;
 	uint32_t send_cnt = 0;
 	struct arpc_connection *con = NULL;
+	struct timeval now;
 
 	LOG_THEN_RETURN_VAL_IF_TRUE((!session_ctx), ARPC_ERROR, "arpc_session_handle_t fd null, exit.");
 	LOG_THEN_RETURN_VAL_IF_TRUE((!send ), ARPC_ERROR, " send null, exit.");
+
+	gettimeofday(&now, NULL);	// 线程安全
 
 	ret = session_get_idle_conn(session_ctx, &con, ARPC_MSG_TYPE_OW, SEND_ONEWAY_END_MAX_TIME);
 	LOG_THEN_RETURN_VAL_IF_TRUE(!con, ARPC_ERROR,"session_get_idle_conn fail");
@@ -181,6 +189,10 @@ int arpc_send_oneway_msg(const arpc_session_handle_t fd, struct arpc_vmsg *send,
 	req_msg = get_common_msg(con, ARPC_MSG_TYPE_OW);
 	LOG_THEN_RETURN_VAL_IF_TRUE(!req_msg, ARPC_ERROR,"get_common_msg");
 
+	req_msg->now = now;
+	req_msg->attr.tx_sec= now.tv_sec;
+	req_msg->attr.tx_usec= now.tv_usec;
+	req_msg->attr.conn_id = con->id;
 	ow_msg = (struct arpc_oneway_handle*)req_msg->ex_data;
 	ow_msg->send = send;
 	ow_msg->clean_send_cb = clean_send;
@@ -189,7 +201,7 @@ int arpc_send_oneway_msg(const arpc_session_handle_t fd, struct arpc_vmsg *send,
 	req_msg->tx_msg = req;
 	req_msg->type = ARPC_MSG_TYPE_OW;
 
-	ret = convert_msg_arpc2xio(send, &req->out, &ow_msg->attr);
+	ret = convert_msg_arpc2xio(send, &req->out, &req_msg->attr);
 	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, free_common_msg, "convert xio msg fail.");
 	req->user_context = req_msg;
 	if (!ow_msg->clean_send_cb){

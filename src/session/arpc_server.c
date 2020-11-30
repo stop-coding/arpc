@@ -72,6 +72,7 @@ arpc_server_t arpc_server_create(const struct arpc_server_param *param)
 	struct arpc_server_work *work_handle;
 	struct arpc_con_info con_param;
 	uint32_t work_num = 0;
+	struct tp_param pool_param;
 	/* handle*/
 	server = arpc_create_server(0);
 	LOG_THEN_RETURN_VAL_IF_TRUE(!server, NULL, "arpc_create_server fail");
@@ -96,6 +97,10 @@ arpc_server_t arpc_server_create(const struct arpc_server_param *param)
 	server->msg_head_max_len = (param->opt.msg_head_max_len && param->opt.msg_head_max_len <= (2048))?
 								param->opt.msg_head_max_len:
 								get_option()->msg_head_max_len;
+	pool_param.cpu_max_num = 16;
+	pool_param.thread_max_num = 32;							
+	server->threadpool = tp_create_thread_pool(&pool_param);
+	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!server->threadpool, error_1, "tp_create_thread_pool null.");
 
 	ret = get_uri(&con_param, server->uri, URI_MAX_LEN);
 	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, error_1, "arpc_create_server fail");
@@ -142,7 +147,7 @@ error_1:
 int arpc_server_destroy(arpc_server_t *fd)
 {
 	struct arpc_server_handle *server = NULL;
-
+	void *thread_pool;
 	LOG_THEN_RETURN_VAL_IF_TRUE(!fd, -1, "arpc_create_server fail");
 	server = (struct arpc_server_handle *)(*fd);
 
@@ -152,10 +157,11 @@ int arpc_server_destroy(arpc_server_t *fd)
 	if (server->server)
 		xio_unbind(server->server);
 	server->server = NULL;
-
+	thread_pool = server->threadpool;
 	if (server)
 		arpc_destroy_server(server);
 	ARPC_LOG_NOTICE( "destroy server success, exit.");
+	tp_destroy_thread_pool(&thread_pool);
 	*fd = NULL;
 	return ARPC_SUCCESS;
 }
@@ -386,7 +392,7 @@ static int server_on_new_session(struct xio_session *session,struct xio_new_sess
 	}else{
 		xio_accept(session, NULL, 0, param.rsp_data, param.rsp_data_len); 
 	}
-
+	new_session->threadpool = server_fd->threadpool;
 	ret = server_insert_session(server_fd, new_session);
 	LOG_ERROR_IF_VAL_TRUE(ret, "server_insert_session fail.");
 	server_fd->new_session_end((arpc_session_handle_t)new_session, &param, server_fd->usr_context);
@@ -420,7 +426,7 @@ struct arpc_server_handle *arpc_create_server(uint32_t ex_ctx_size)
 	QUEUE_INIT(&svr->q_session);
 	QUEUE_INIT(&svr->q_work);
 	svr->iov_max_len = IOV_DEFAULT_MAX_LEN;
-	svr->threadpool = arpc_get_threadpool();
+	svr->threadpool = NULL;
 	return svr;
 }
 
@@ -650,7 +656,7 @@ static int xio_server_work_run(void * ctx)
 	for(;;){	
 		if (xio_context_run_loop(work->work_ctx, XIO_INFINITE) < 0)
 			ARPC_LOG_ERROR("xio error msg: %s.", xio_strerror(xio_errno()));
-		ARPC_LOG_DEBUG("xio context run loop pause...");
+		ARPC_LOG_ERROR("xio server context run loop pause...");
 		arpc_cond_lock(&work->cond);
 		if(work->status == ARPC_WORK_STA_EXIT){
 			arpc_cond_notify(&work->cond);

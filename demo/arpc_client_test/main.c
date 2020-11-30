@@ -35,7 +35,7 @@
 static struct arpc_cond 		g_cond;
 static BYTE g_buf_str[SHA256_BLOCK_SIZE*2 +1] = {0};
 
-#define CLIENT_LOG(format, arg...) fprintf(stderr, "[ SERVER ]"format"\n",##arg)
+#define CLIENT_LOG(format, arg...) //fprintf(stderr, "[ SERVER ]"format"\n",##arg)
 
 void conver_hex_to_str(BYTE *hex, int hex_len, BYTE *str, int str_len)
 {
@@ -213,7 +213,15 @@ int session_send_msg(arpc_session_handle_t session_fd, int32_t loop_time)
 			if (ret != 0){
 				printf("arpc_send_oneway_msg fail\n");
 			}
+			if (loop_time%10 != 0){
+				continue;
+			}
+			ret = arpc_do_request(session_fd, request, 30*1000);
+			if (ret){
+				printf("arpc_do_request fail\n");
+			}
 		}
+
 		free(request->send.vec);
 		request->send.vec = NULL;
 		break;
@@ -224,7 +232,6 @@ int session_send_msg(arpc_session_handle_t session_fd, int32_t loop_time)
 	return 0;
 }
 
-#define MAX_THREADS 	1
 #define MAX_LOOP_TIMES 	500000
 
 static uint32_t thread_num = 1;
@@ -235,12 +242,12 @@ static void *worker_thread(void *data)
 	arpc_session_handle_t session_fd = (arpc_session_handle_t)data;
 	int64_t i =0;
 	int ret;
-
-	ret = session_send_msg(session_fd, MAX_LOOP_TIMES);
+	printf("test thread[%lu] starting......\n", pthread_self());
+	ret = session_send_msg(session_fd, loop_times);
 	if (ret){
 		printf("error: thread[%lu] fail.\n", pthread_self());
 	}
-	printf("thread[%lu] exit success.\n", pthread_self());
+	printf("test thread[%lu] exit success.\n", pthread_self());
 	return NULL;
 }
 /*---------------------------------------------------------------------------*/
@@ -251,16 +258,13 @@ int main(int argc, char *argv[])
 	uint32_t				i = 0;
 	int 					ret = 0;
 	uint64_t				offset = 0,send_len = 0, file_len =0;
-	pthread_t		g_thread_id[MAX_THREADS] = {0};
+	pthread_t		g_thread_id[256] = {0};
 
 	struct arpc_client_session_param param;
 	struct arpc_msg *request =NULL;
 	arpc_session_handle_t session_fd;
 	struct arpc_msg_param p;
 	FILE *fp = NULL;
-	BYTE buf[SHA256_BLOCK_SIZE];
-	BYTE buf_str[SHA256_BLOCK_SIZE*2 +1];
-	SHA256_CTX ctx;
 	struct aprc_option opt = {0};
 	struct timeval start_now;
 	struct timeval end_now;
@@ -281,6 +285,10 @@ int main(int argc, char *argv[])
 	loop_times = atol(argv[5]);
 	g_file_size = atol(argv[6]) * 1024;
 
+	if (thread_num > 256) {
+		printf("thread num: %u over 256\n", thread_num);
+		return 0;
+	}
 	//SET_FLAG(opt.control, ARPC_E_CTRL_CRC); //开启通信CRC检查
 	opt.msg_iov_max_len = 4*1024;
 	opt.thread_max_num = 32;
@@ -302,12 +310,12 @@ int main(int argc, char *argv[])
 	}
 	arpc_sleep(1);
 	gettimeofday(&start_now, NULL);	//
-	for (i = 0; i < MAX_THREADS; i++) {
+	for (i = 0; i < thread_num; i++) {
 		pthread_create(&g_thread_id[i], NULL, worker_thread, session_fd);
 	}
 
 	/* join the threads */
-	for (i = 0; i < MAX_THREADS; i++)
+	for (i = 0; i < thread_num; i++)
 		pthread_join(g_thread_id[i], NULL);
 	gettimeofday(&end_now, NULL);	//
 	end_now.tv_sec = end_now.tv_sec - start_now.tv_sec;
@@ -318,9 +326,9 @@ int main(int argc, char *argv[])
 	printf("##### task test end for targe[%s:%s] \n", argv[1], argv[2]);
 	printf("##### send IO size:[%lu KB].\n", g_file_size/1024);
 	printf("##### send connection num:[%u].\n", param.con_num);
-	printf("##### send thread num:[%u].\n", MAX_THREADS);
-	printf("##### send total QPS:[%lu q/s].\n", (MAX_THREADS*MAX_LOOP_TIMES)/end_now.tv_sec);
-	printf("##### send total v:[%lu KB/s].\n", (g_file_size*MAX_LOOP_TIMES*MAX_THREADS)/1024/end_now.tv_sec);
+	printf("##### send thread num:[%u].\n", thread_num);
+	printf("##### send total QPS:[%lu q/s].\n", (thread_num*loop_times)/end_now.tv_sec);
+	printf("##### send total v:[%lu KB/s].\n", (g_file_size*loop_times*thread_num)/1024/end_now.tv_sec);
 	printf("##### send total times:[%lu.%05lu s] .\n\n", end_now.tv_sec, end_now.tv_usec);
 	printf("\n\n################################################\n");
 	arpc_client_destroy_session(&session_fd);

@@ -56,6 +56,7 @@ arpc_session_handle_t arpc_client_create_session(const struct arpc_client_sessio
 	struct xio_connection_params xio_con_param;
 	struct arpc_connection_param conn_param;
 	struct arpc_proto_new_session req_new;
+	struct tp_param pool_param;
 	uint32_t rx_con_num = 1;
 	//LOG_THEN_RETURN_VAL_IF_TRUE(!param->ops, NULL, "ops is null.");
 
@@ -108,14 +109,12 @@ arpc_session_handle_t arpc_client_create_session(const struct arpc_client_sessio
 														sizeof(struct arpc_proto_new_session));
 	}
 
-	idle_thread_num = tp_get_pool_idle_num(session->threadpool);
-	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(idle_thread_num < ARPC_MIN_THREAD_IDLE_NUM, error_2, 
-								"idle_thread_num[%u] is low 2.", idle_thread_num);
+	pool_param.cpu_max_num = 16;
+	pool_param.thread_max_num = (param->con_num > 0)?(param->con_num*5):12;	// 默认是1:5的关系					
+	session->threadpool = tp_create_thread_pool(&pool_param);
 
-	idle_thread_num = idle_thread_num - ARPC_MIN_THREAD_IDLE_NUM;
-	idle_thread_num = (param->con_num && param->con_num < idle_thread_num)? param->con_num : idle_thread_num; // 默认是两个链接
+	idle_thread_num = (param->con_num > 0)? param->con_num : 2; // 默认是两个链接
 
-	idle_thread_num = (idle_thread_num < ARPC_CLIENT_MAX_CON_NUM)? idle_thread_num: ARPC_CLIENT_MAX_CON_NUM;
 	memset(&conn_param, 0, sizeof(struct arpc_connection_param));
 	conn_param.type = ARPC_CON_TYPE_CLIENT;
 	conn_param.session = session;
@@ -123,10 +122,10 @@ arpc_session_handle_t arpc_client_create_session(const struct arpc_client_sessio
 	if (conn_param.timeout_ms > 0){
 		SET_FLAG(session->flags, ARPC_SESSION_ATTR_AUTO_DISCONNECT);
 	}
-	rx_con_num = (param->rx_con_num > 1 && param->rx_con_num <= (idle_thread_num/2))?(param->rx_con_num):(idle_thread_num/2);
+	rx_con_num = (param->rx_con_num > 0 && param->rx_con_num <= (idle_thread_num/2))?(param->rx_con_num):(idle_thread_num/2);
 
 	for (i = 0; i < idle_thread_num; i++) {
-		conn_param.id = i;
+		conn_param.id = i + ARPC_CONN_ID_OFFSET;
 		if (i < rx_con_num) {
 			conn_param.io_type = ARPC_IO_TYPE_IN;
 		}else{
@@ -163,14 +162,17 @@ int arpc_client_destroy_session(arpc_session_handle_t *fd)
 	int ret;
 	struct arpc_client_ctx *client_ctx = NULL;
 	struct arpc_session_handle *session = NULL;
+	void *thread_pool;
 	LOG_THEN_RETURN_VAL_IF_TRUE(!fd, -1, "client session handle is null fail.");
 
 	session = (struct arpc_session_handle *)(*fd);
 	client_ctx = (struct arpc_client_ctx *)session->ex_ctx;
 	SAFE_FREE_MEM(client_ctx->private_data);
+	thread_pool = session->threadpool;
 	ret = arpc_destroy_session(session, CLIENT_DESTROY_SESSION_MAX_TIME);//todo
 	LOG_THEN_RETURN_VAL_IF_TRUE(ret, -1, "arpc_destroy_session[%p] fail.", session);
 	ARPC_LOG_NOTICE( "destroy session[%p] success.", session);
+	tp_destroy_thread_pool(&thread_pool);
 	*fd = NULL;
 	return ret;
 }

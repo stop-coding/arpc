@@ -45,6 +45,7 @@ extern "C" {
 #define ARPC_LOG_NOTICE(format, arg...) BASE_LOG_NOTICE(format, ##arg)
 #define ARPC_LOG_DEBUG(format, arg...) 	BASE_LOG_DEBUG(format,  ##arg)
 #define ARPC_LOG_TRACE(format, arg...) 	BASE_LOG_TRACE(format,  ##arg)
+#define ARPC_LOG_STATUS(format, arg...) BASE_LOG_STATUS(format,  ##arg)
 
 #define ARPC_ASSERT(condition, format, arg...) BASE_ASSERT(condition, format, ##arg)
 
@@ -76,6 +77,7 @@ extern "C" {
 #define IS_SET_RSP(flag) (flag&(XIO_MSG_RSP)
 #define IS_SET_REQ(flag) (flag&XIO_MSG_REQ)
 
+#define ARPC_CONN_ID_OFFSET 10
 // 互斥锁
 struct arpc_mutex{
   pthread_mutex_t     lock;	    			/* lock */
@@ -285,6 +287,7 @@ struct arpc_common_msg {
     uint32_t                    flag;
 	enum  arpc_msg_status		status;
 	struct timeval 				now;
+	struct arpc_msg_attr		attr;
 	void 		                *usr_context;				/*! @brief 用户上下文 */
     char                        ex_data[0];
 };
@@ -292,7 +295,6 @@ struct arpc_common_msg {
 struct arpc_oneway_handle {
     struct arpc_vmsg	        *send;
 	void 				        *send_ctx;
-	struct arpc_msg_attr        attr;
 	int (*clean_send_cb)(struct arpc_vmsg *send, void* send_ctx);
 };
 
@@ -304,7 +306,6 @@ struct arpc_request_handle {
 struct arpc_rsp_handle {
     struct xio_msg				*x_rsp_msg;
 	struct arpc_vmsg 			*rsp_usr_iov;
-	struct arpc_msg_attr		attr;
 	int (*release_rsp_cb)(struct arpc_vmsg *rsp_iov, void* rsp_usr_ctx);
 	void *rsp_usr_ctx;
 };
@@ -329,7 +330,6 @@ int arpc_uri_get_proto(const char *uri, char *proto, int proto_len);
 
 const struct aprc_option *get_option();
 
-void* arpc_get_threadpool();
 uint32_t arpc_thread_max_num();
 uint32_t arpc_cpu_max_num();
 int arpc_get_ipv4_addr(struct sockaddr_storage *src_addr, char *ip, uint32_t len, uint32_t *port);
@@ -338,7 +338,7 @@ int arpc_get_ipv4_addr(struct sockaddr_storage *src_addr, char *ip, uint32_t len
 void debug_printf_msg(struct xio_msg *rsp);
 int post_to_async_thread(struct arpc_thread_param *param);
 
-int create_xio_msg_usr_buf(struct xio_msg *msg, struct proc_header_func *ops, uint64_t iov_max_len, void *usr_ctx);
+int create_xio_msg_usr_buf(struct xio_msg *msg, struct proc_header_func *ops, uint64_t iov_max_len, void *usr_ctx, struct arpc_msg_attr *attr);
 int destroy_xio_msg_usr_buf(struct xio_msg *msg, mem_free_cb_t free_cb, void *usr_ctx);
 
 int move_msg_xio2arpc(struct xio_vmsg *xio_msg, struct arpc_vmsg *msg, struct arpc_msg_attr *attr);

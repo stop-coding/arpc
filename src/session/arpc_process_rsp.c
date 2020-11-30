@@ -22,10 +22,12 @@
 #include "arpc_request.h"
 #include "arpc_message.h"
 
-int process_rsp_header(struct xio_msg *rsp, struct arpc_connection *con)
+int process_rsp_header(struct arpc_connection *con, struct xio_msg *rsp)
 {
 	struct proc_header_func head_ops;
 	int ret;
+	struct arpc_msg_attr msg_attr = {0};
+	struct timeval 		tx_time;
 	struct arpc_msg_ex *ex_msg;
 	struct arpc_common_msg *req_msg = (struct arpc_common_msg *)rsp->user_context;
 
@@ -48,18 +50,21 @@ int process_rsp_header(struct xio_msg *rsp, struct arpc_connection *con)
 	head_ops.free_cb = ex_msg->free_cb;
 	head_ops.proc_head_cb = NULL;
 	if (ex_msg->iov_max_len) {
-		ret = create_xio_msg_usr_buf(rsp, &head_ops, ex_msg->iov_max_len, ex_msg);//申请资源
+		ret = create_xio_msg_usr_buf(rsp, &head_ops, ex_msg->iov_max_len, ex_msg, &msg_attr);//申请资源
 	}else{
-		ret = create_xio_msg_usr_buf(rsp, &head_ops, arpc_get_max_iov_len(con), ex_msg);//申请资源
+		ret = create_xio_msg_usr_buf(rsp, &head_ops, arpc_get_max_iov_len(con), ex_msg, &msg_attr);//申请资源
 	}
 	
 	if (!ret){
 		SET_FLAG(ex_msg->flags, XIO_RSP_IOV_ALLOC_BUF);
+		tx_time.tv_sec = msg_attr.tx_sec;
+		tx_time.tv_usec = msg_attr.tx_usec;
+		statistics_per_time(&tx_time, &con->rx_rsp_send, 5);
 	}
 	return ret;
 }
 
-int process_rsp_data(struct xio_msg *rsp, int last_in_rxq, struct arpc_connection *con)
+int process_rsp_data(struct arpc_connection *con, struct xio_msg *rsp, int last_in_rxq)
 {
 	int ret;
 	struct arpc_msg_attr attr = {0};
@@ -92,13 +97,13 @@ int process_rsp_data(struct xio_msg *rsp, int last_in_rxq, struct arpc_connectio
 		ret = destroy_xio_msg_usr_buf(rsp, ex_msg->free_cb, ex_msg->usr_context);
 		LOG_ERROR_IF_VAL_TRUE((ret), "destroy_xio_msg_usr_buf fail.");
 
-		if (attr.rsp_crc && ex_msg->attr.req_crc && attr.rsp_crc != ex_msg->attr.req_crc) {
+		if (attr.rsp_crc && req_msg->attr.req_crc && attr.rsp_crc != req_msg->attr.req_crc) {
 			SET_FLAG(ex_msg->flags, XIO_MSG_ERROR_DISCARD_DATA);
-			ARPC_ASSERT(attr.rsp_crc == ex_msg->attr.req_crc, "request crc:0x%lx, but rsp it:0x%lx.", 
-							ex_msg->attr.req_crc,
+			ARPC_ASSERT(attr.rsp_crc == req_msg->attr.req_crc, "request crc:0x%lx, but rsp it:0x%lx.", 
+							req_msg->attr.req_crc,
 							attr.rsp_crc);
 			ARPC_LOG_ERROR("crc fail fail, request crc:0x%lx, but rsp it:0x%lx.",
-							ex_msg->attr.req_crc,
+							req_msg->attr.req_crc,
 							attr.rsp_crc);
 			free_msg_xio2arpc(&ex_msg->msg->receive, ex_msg->free_cb, ex_msg->usr_context);
 		}

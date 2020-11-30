@@ -67,11 +67,18 @@ struct arpc_connection {
 	struct statistics_data		tx_ow;
 	struct statistics_data		tx_req;
 	struct statistics_data		tx_rsp;
+	struct statistics_data		tx_req_cmit;
+	struct statistics_data		tx_ow_cmit;
+	struct statistics_data		tx_rsp_cmit;
 	struct timeval 				rx_interval;
 	struct timeval 				rx_now;
 	struct statistics_data		rx_ow;
 	struct statistics_data		rx_req;
 	struct statistics_data		rx_rsp;
+	struct statistics_data		rx_ow_send;
+	struct statistics_data		rx_req_send;
+	struct statistics_data		rx_rsp_send;
+
 	char						ctx[0];
 };
 

@@ -28,16 +28,33 @@
 
 static int request_msg_async_deal(void *usr_ctx);
 
-int process_request_header(struct arpc_connection *con, struct xio_msg *msg, struct request_ops *ops, uint64_t iov_max_len, void *usr_ctx)
+int process_request_header(struct arpc_connection *con, struct xio_msg *msg)
 {
 	struct proc_header_func head_ops;
+	struct request_ops *ops;
+	int ret;
+	struct arpc_msg_attr msg_attr = {0};
+	struct timeval 		tx_time;
+
+	ops = &(arpc_get_ops(con)->req_ops);
 	head_ops.alloc_cb = ops->alloc_cb;
 	head_ops.free_cb = ops->free_cb;
 	head_ops.proc_head_cb = ops->proc_head_cb;
-	return create_xio_msg_usr_buf(msg, &head_ops, iov_max_len, usr_ctx);
+
+	ret = create_xio_msg_usr_buf(msg, &head_ops, arpc_get_max_iov_len(con), arpc_get_ops_ctx(con), &msg_attr);
+
+	tx_time.tv_sec = msg_attr.tx_sec;
+	tx_time.tv_usec = msg_attr.tx_usec;
+	if(arpc_get_conn_type(con) == ARPC_CON_TYPE_SERVER && msg_attr.conn_id >= ARPC_CONN_ID_OFFSET && con->id != msg_attr.conn_id){
+		ARPC_LOG_NOTICE("server session modify conn id from[%u] to [%u]", con->id, msg_attr.conn_id);
+		con->id = msg_attr.conn_id;
+	}
+	statistics_per_time(&tx_time, &con->rx_req_send, 5);
+
+	return ret;
 }
 
-int process_request_data(struct arpc_connection *con, struct xio_msg *req, struct request_ops *ops, int last_in_rxq, void *usr_ctx)
+int process_request_data(struct arpc_connection *con, struct xio_msg *req, int last_in_rxq)
 {
 	uint32_t			nents = vmsg_sglist_nents(&req->in);
 	uint32_t			i;
@@ -46,11 +63,17 @@ int process_request_data(struct arpc_connection *con, struct xio_msg *req, struc
 	struct arpc_common_msg *rsp_hanlde;
 	struct arpc_rsp_handle	*rsp_fd_ex;
 	struct arpc_thread_param *async_param;
-	int					ret;
+	int						ret;
 	struct arpc_msg_attr	attr = {0};
+	struct request_ops *ops;
+	void *usr_ctx;
+	struct timeval 		tx_time;
 
 	LOG_THEN_RETURN_VAL_IF_TRUE((!req), ARPC_ERROR, "req null.");
-	LOG_THEN_RETURN_VAL_IF_TRUE((!ops), ARPC_ERROR, "ops null.");
+	LOG_THEN_RETURN_VAL_IF_TRUE((!con), ARPC_ERROR, "con null.");
+
+	ops = &(arpc_get_ops(con)->req_ops);
+	usr_ctx = arpc_get_ops_ctx(con);
 
 	memset(&rev_iov, 0, sizeof(struct arpc_vmsg));
 	
@@ -64,8 +87,8 @@ int process_request_data(struct arpc_connection *con, struct xio_msg *req, struc
 	LOG_THEN_RETURN_VAL_IF_TRUE(!rsp_hanlde, ARPC_ERROR, "rsp_hanlde alloc null.");
 	rsp_fd_ex = (struct arpc_rsp_handle*)rsp_hanlde->ex_data;
 	rsp_fd_ex->x_rsp_msg = req;//保存回复的结构体
-	rsp_fd_ex->attr.rsp_crc = attr.req_crc;//请求保存在回复体里
-	rsp_fd_ex->attr.req_crc = 0;
+	rsp_hanlde->attr.rsp_crc = attr.req_crc;//请求保存在回复体里
+	rsp_hanlde->attr.req_crc = 0;
 	memset(&usr_rsp_param, 0, sizeof(struct arpc_rsp));
 	usr_rsp_param.rsp_fd = (void *)rsp_hanlde;
 
@@ -118,6 +141,12 @@ free_user_buf:
 do_respone:	
 	/* attach request to response */
 	ARPC_LOG_TRACE("do respone request msg.");
+	gettimeofday(&tx_time, NULL);	// 线程安全
+
+	rsp_hanlde->attr.tx_sec= tx_time.tv_sec;
+	rsp_hanlde->attr.tx_usec= tx_time.tv_usec;
+	rsp_hanlde->attr.conn_id = con->id;
+
 	ret = arpc_init_response(rsp_hanlde);
 	LOG_ERROR_IF_VAL_TRUE(ret, "arpc_init_response fail.");
 	if(!ret){
@@ -134,6 +163,7 @@ static int request_msg_async_deal(void *usr_ctx)
 	int ret;
 	struct arpc_common_msg *rsp_fd;
 	struct arpc_rsp_handle	*rsp_fd_ex;
+	struct timeval 		tx_time;
 
 	LOG_THEN_RETURN_VAL_IF_TRUE(!async, ARPC_ERROR, "async null.");
 	LOG_THEN_RETURN_VAL_IF_TRUE(!async->ops.proc_async_cb, ARPC_ERROR, "request proc_async_cb null.");
@@ -160,6 +190,9 @@ static int request_msg_async_deal(void *usr_ctx)
 	rsp_fd_ex->release_rsp_cb = async->ops.release_rsp_cb;
 
 	if (!IS_SET(rsp.flags, METHOD_CALLER_ASYNC)) {
+		gettimeofday(&tx_time, NULL);	// 线程安全
+		rsp_fd->attr.tx_sec= tx_time.tv_sec;
+		rsp_fd->attr.tx_usec= tx_time.tv_usec;
 		ret = arpc_init_response(rsp_fd);
 		LOG_ERROR_IF_VAL_TRUE(ret, "arpc_do_respone fail.");
 		if(!ret){

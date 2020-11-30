@@ -40,15 +40,20 @@ int arpc_do_response(arpc_rsp_handle_t *rsp_fd, struct arpc_vmsg *rsp_iov, rsp_c
 	struct arpc_common_msg *arpc_rsp_fd;
 	struct arpc_rsp_handle *rsp_fd_ex;
 	int ret;
+	struct timeval now;
 	LOG_THEN_RETURN_VAL_IF_TRUE((!rsp_fd), ARPC_ERROR, "rsp_fd is null.");
 	LOG_THEN_RETURN_VAL_IF_TRUE((!rsp_iov), ARPC_ERROR, "rsp_iov is null.");
 	LOG_THEN_RETURN_VAL_IF_TRUE((!release_rsp_cb), ARPC_ERROR, "rsp_iov is null.");
 
+	gettimeofday(&now, NULL);	// 线程安全
 	arpc_rsp_fd = (struct arpc_common_msg *)(*rsp_fd);
 	
 	ret = arpc_cond_lock(&arpc_rsp_fd->cond);
 	LOG_THEN_RETURN_VAL_IF_TRUE(ret, ARPC_ERROR, "arpc_cond_lock msg fail, maybe free...");
-
+	arpc_rsp_fd->now = now;
+	arpc_rsp_fd->attr.tx_sec= now.tv_sec;
+	arpc_rsp_fd->attr.tx_usec= now.tv_usec;
+	arpc_rsp_fd->attr.conn_id = arpc_rsp_fd->conn->id;
 	rsp_fd_ex = (struct arpc_rsp_handle*)arpc_rsp_fd->ex_data;
 	rsp_fd_ex->release_rsp_cb = release_rsp_cb;
 	rsp_fd_ex->rsp_usr_iov = rsp_iov;
@@ -84,7 +89,7 @@ int arpc_init_response(struct arpc_common_msg *rsp_fd)
 	
 	if(rsp_iov && rsp_iov->head && rsp_iov->head_len){
 		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!rsp_fd_ex->release_rsp_cb, rsp_default, "release_rsp_cb is null ,can't send user rsp data.");
-		ret = convert_msg_arpc2xio(rsp_iov, &rsp_msg->out, &rsp_fd_ex->attr);
+		ret = convert_msg_arpc2xio(rsp_iov, &rsp_msg->out, &rsp_fd->attr);
 		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, rsp_default, "convert_msg_arpc2xio fail.");
 		SET_FLAG(rsp_msg->usr_flags, XIO_MSG_FLAG_ALLOC_IOV_MEM);
 		goto rsp;

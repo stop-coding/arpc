@@ -67,6 +67,7 @@ struct arpc_session_handle{
 	enum arpc_session_status status;
 	struct arpc_cond  cond;
 	struct arpc_session_ops	  ops;
+	struct timeval 			interval;
 	uint32_t	msg_head_max_len;
 	uint64_t	msg_data_max_len;
 	uint32_t	msg_iov_max_len;
@@ -91,6 +92,8 @@ int session_move_con_tail(struct arpc_session_handle *s, struct arpc_connection 
 
 int session_get_idle_conn(struct arpc_session_handle *session, struct arpc_connection **conn, 
 							enum  arpc_msg_type msg_type, int64_t timeout_ms);
+
+void print_session_status(struct arpc_session_handle *session, struct timeval *now);
 
 #ifdef __cplusplus
 }

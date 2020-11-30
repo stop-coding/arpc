@@ -31,6 +31,7 @@ extern "C" {
 #define LOG_TIME_FMT "%04d/%02d/%02d-%02d:%02d:%02d.%05ld"
 
 #define LOG_SWITCH_INIT (1<<ARPC_LOG_LEVEL_E_MAX)
+#define LOG_STATUS_SWICH_FILE  "on_status"
 #define LOG_TRACE_SWICH_FILE "on_trace"
 #define LOG_DEBUG_SWICH_FILE "on_debug"
 #define LOG_INFO_SWICH_FILE  "on_info"
@@ -49,12 +50,17 @@ extern "C" {
 #define LOG_FILE_ENABLE (1<<(ARPC_LOG_LEVEL_E_MAX + 3))
 #define LOG_FILE_SWICH_FILE  "on_filelog"
 #define LOG_FILE_NAME        "messages.log"
-#define LOG_FILE_MAX_SIZE    (16*1024)
+#define LOG_FILE_MAX_SIZE    (512*1024)
 
 
 static void set_log_switch(const char *module, int32_t *log_enabale)
 {
     char			buf[128];
+
+	snprintf(buf, sizeof(buf), "/run/%s/%s", module, LOG_STATUS_SWICH_FILE);
+    if(access(buf, F_OK) == 0){
+        *log_enabale = (*log_enabale)|(1<<ARPC_LOG_LEVEL_E_STATUS);
+    }
     snprintf(buf, sizeof(buf), "/run/%s/%s", module, LOG_TRACE_SWICH_FILE);
     if(access(buf, F_OK) == 0){
         *log_enabale = (*log_enabale)|(1<<ARPC_LOG_LEVEL_E_TRACE);
@@ -75,6 +81,8 @@ static void set_log_switch(const char *module, int32_t *log_enabale)
     if(access(buf, F_OK) != 0){
         *log_enabale = (*log_enabale)|(1<<ARPC_LOG_LEVEL_E_FATAL);
     }
+
+	//日志输出路径
 
 	snprintf(buf, sizeof(buf), "/run/%s/%s", module, SYSLOG_SWICH_FILE);
     if(access(buf, F_OK) == 0){
@@ -168,6 +176,21 @@ void arpc_vlog(enum arpc_log_level level, const char *module, const char *file,u
 	length = vsnprintf(buf, sizeof(buf), fmt, args);
 	va_end(args);
 	buf[length] = 0;
+
+	if(level ==ARPC_LOG_LEVEL_E_STATUS){
+		if (log_enabale&FPRINTF_SWICH_ENABLE) {
+			fprintf(stderr,"%s", buf);
+		}
+		if (log_enabale&SYSLOG_SWICH_ENABLE) {
+			syslog(LOG_ERR,"%s", buf);
+		}
+
+		if (log_enabale&LOG_FILE_ENABLE) {
+			snprintf(log_file_path, sizeof(log_file_path), "/run/%s/%s", module, LOG_FILE_NAME);
+        	write_log_file(log_file_path, LOG_FILE_MAX_SIZE,"%s",buf);
+		}
+		return;
+	}
 
 	gettimeofday(&tv, NULL);
 	time1 = (time_t)tv.tv_sec;

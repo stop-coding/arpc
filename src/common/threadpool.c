@@ -33,6 +33,7 @@
 #define TP_LOG_ERROR(format, arg...) BASE_LOG_ERROR(format, ##arg)
 #define TP_LOG_NOTICE(format, arg...) BASE_LOG_NOTICE(format, ##arg)
 #define TP_LOG_DEBUG(format, arg...) 	BASE_LOG_DEBUG(format,  ##arg)
+#define TP_LOG_STATUS(format, arg...) BASE_LOG_STATUS(format,  ##arg)
 
 #define FLAG_TASK_ACTIVE  0
 #define FLAG_TASK_IDLE    1
@@ -57,6 +58,11 @@
 #define TASK_CLR_EXIT(flag) flag=(flag&~(1<<FLAG_TASK_EXIT))
 
 #define HIDE_ADDR 1
+#define THREAD_STATUS_SHOW_HEAD\
+ "### threadpool:%p  total:%u  idle:%u  queue:%lu ###\n*thread-id     *work-id     *run-cnt     *ave-time    *curtime *\n"
+
+#define THREAD_STATUS_SHOW\
+ "%-9lu   %-9u   %-9u   %03lu.%06lu   %03lu.%06lu\n" 
 
 #define WORK_PRIVATE_DATA QUEUE queue;pthread_cond_t cond;pthread_mutex_t mutex;uint32_t flag;
 struct _work {
@@ -71,7 +77,6 @@ struct _work {
 struct _thread_msg{
     int32_t           work_id;
     pthread_t         thread_id;
-	struct timeval 	  interval;
 	uint64_t		  run_count;
 	struct statistics_data	time;
     uint32_t          flag;
@@ -86,7 +91,9 @@ struct _thread_pool_msg{
     struct _thread_msg  *thread;
     uint32_t            idle_num;
 	uint32_t			cpu_max_num;
-	sem_t 				*sync;					/* 线程同步*/
+	sem_t 				*sync;
+	struct timeval 	    interval;					/* 统计间隔*/
+	uint64_t			wait_task_num;
 	char  				ext_data[0];				
 };
 
@@ -136,7 +143,7 @@ static void *task_worker(void* arg) {
 
 		QUEUE_REMOVE(q);
 		QUEUE_INIT(q);  /* Signal uv_cancel() that the work req is executing. */
-
+		pool_ctx->wait_task_num--;
 		pthread_mutex_unlock(&pool_ctx->mutex);
 		to_run = QUEUE_DATA(q, struct _work, queue);
 
@@ -165,17 +172,7 @@ static void *task_worker(void* arg) {
 
 		pthread_mutex_lock(&pool_ctx->mutex);
 		t_msg->run_count++;
-		statistics_per_time(&now, &t_msg->time, 5);
-		if (t_msg->interval.tv_sec + 2*STATISTICS_PRINT_INTERVAL_S <= now.tv_sec) {
-			t_msg->interval = now;
-			TP_LOG_NOTICE("### thread status ###:\n  # thread id[0x%lx][%d],\n  # run count:%lu,\n  # run ave:%lu.%06ld s.\n######\n", 
-							t_msg->thread_id, 
-							t_msg->work_id,
-							t_msg->run_count,
-							t_msg->time.ave.tv_sec, t_msg->time.ave.tv_usec,
-							t_msg->time.ave.tv_sec, t_msg->time.ave.tv_usec,
-							t_msg->time.ave.tv_sec, t_msg->time.ave.tv_usec);
-		}
+		statistics_per_time(&now, &t_msg->time, 2);
 	}
 	TASK_CLR_ACTIVE(t_msg->flag);
 	pthread_mutex_unlock(&pool_ctx->mutex);
@@ -349,12 +346,29 @@ work_handle_t tp_post_one_work(tp_handle fd, struct tp_thread_work *w, uint8_t a
   }
   pthread_mutex_lock(&pool->mutex);
   QUEUE_INSERT_TAIL(&pool->wait_to_run, &work->queue);
+  pool->wait_task_num++;
   if (pool->idle_num > 0){
     	pthread_cond_signal(&pool->cond);
   }else{
-	  TP_LOG_DEBUG("no idle thread to process task, idle:%u, total:%u.", pool->idle_num, pool->thread_num);
+	  if (pool->wait_task_num > 1000 && (pool->wait_task_num%3 == 0)) {
+		  TP_LOG_DEBUG("no idle thread to process task, wait queue:%lu, total:%u.", pool->wait_task_num, pool->thread_num);
+	  }
   }
-
+  if (pool->interval.tv_sec + STATISTICS_PRINT_INTERVAL_S <= work->now.tv_sec) {
+	pool->interval = work->now;
+	TP_LOG_STATUS(THREAD_STATUS_SHOW_HEAD, pool, pool->thread_num,pool->idle_num, pool->wait_task_num);
+	for (i = 0; i < pool->thread_num; i++) {
+		TP_LOG_STATUS(THREAD_STATUS_SHOW, 
+					pool->thread[i].thread_id, 
+					pool->thread[i].work_id, 
+					pool->thread[i].run_count, 
+					pool->thread[i].time.ave.tv_sec,
+					pool->thread[i].time.ave.tv_usec,
+					pool->thread[i].time.cur.tv_sec,
+					pool->thread[i].time.cur.tv_usec);
+	}
+	TP_LOG_STATUS("------------------------------------\n");
+  }
   pthread_mutex_unlock(&pool->mutex);
   return work;
 error:

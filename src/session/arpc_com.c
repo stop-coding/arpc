@@ -157,7 +157,7 @@ int arpc_init_r(struct aprc_option *opt)
 }
 int arpc_init()
 {
-	struct tp_param p = {0};
+	//struct tp_param p = {0};
 	ARPC_LOG_DEBUG( "arpc_init.");
 	arpc_mutex_lock(&g_param.mutex);
 	if (g_param.is_init){
@@ -167,9 +167,9 @@ int arpc_init()
 	}
 	g_param.is_init = 1;
 	g_param.opt.cpu_max_num = get_nprocs();
-	p.cpu_max_num = g_param.opt.cpu_max_num;
-	p.thread_max_num = g_param.opt.thread_max_num;
-	g_param.thread_pool = tp_create_thread_pool(&p);
+	//p.cpu_max_num = g_param.opt.cpu_max_num;
+	//p.thread_max_num = g_param.opt.thread_max_num;
+	//g_param.thread_pool = tp_create_thread_pool(&p);
 	arpc_mutex_unlock(&g_param.mutex);
 	xio_init();
 	set_xio_option(&g_param.opt);
@@ -291,7 +291,7 @@ int post_to_async_thread(struct arpc_thread_param *param)
 	return 0;
 }
 
-int create_xio_msg_usr_buf(struct xio_msg *msg, struct proc_header_func *ops, uint64_t iov_max_len, void *usr_ctx)
+int create_xio_msg_usr_buf(struct xio_msg *msg, struct proc_header_func *ops, uint64_t iov_max_len, void *usr_ctx, struct arpc_msg_attr *attr)
 {
 	struct xio_iovec_ex	*sglist =NULL;
 	uint32_t			nents = 0;
@@ -308,17 +308,20 @@ int create_xio_msg_usr_buf(struct xio_msg *msg, struct proc_header_func *ops, ui
 	LOG_THEN_RETURN_VAL_IF_TRUE((!msg->in.header.iov_len), -1, "header len is 0.");
 
 	msg->usr_flags = 0;
-	if(ops->proc_head_cb){
-		memset(&header, 0, sizeof(struct arpc_header_msg));
-		header.head_len = msg->in.header.iov_len;
-		header.data_len = msg->in.total_data_len;
-		ret = unpack_msg_head((uint8_t *)msg->in.header.iov_base, msg->in.header.iov_len, &proto, &usr_addr, &header.head_len);
-		if (usr_addr && !ret){
-			header.head = usr_addr;
-		}else{
-			header.head = msg->in.header.iov_base;
-			header.head_len = msg->in.header.iov_len;
+	memset(&header, 0, sizeof(struct arpc_header_msg));
+	header.head_len = msg->in.header.iov_len;
+	header.data_len = msg->in.total_data_len;
+	ret = unpack_msg_head((uint8_t *)msg->in.header.iov_base, msg->in.header.iov_len, &proto, &usr_addr, &header.head_len);
+	if (usr_addr && !ret){
+		header.head = usr_addr;
+		if(attr){
+			*attr = proto;
 		}
+	}else{
+		header.head = msg->in.header.iov_base;
+		header.head_len = msg->in.header.iov_len;
+	}
+	if(ops->proc_head_cb){
 		ret = ops->proc_head_cb(&header, usr_ctx, &flag);
 		if (ret != ARPC_SUCCESS){
 			ARPC_LOG_DEBUG("discard data, total_data_len[%lu].", msg->in.total_data_len);
@@ -342,7 +345,7 @@ int create_xio_msg_usr_buf(struct xio_msg *msg, struct proc_header_func *ops, ui
 		ARPC_LOG_ERROR("func malloc or free is null.");
 		return ARPC_ERROR;
 	}
-
+	iov_max_len = (proto.iovec_num > 0)?(msg->in.total_data_len/proto.iovec_num):iov_max_len;//根据请求消息设置vec长度
 	// 分配内存
 	last_size = msg->in.total_data_len%iov_max_len;
 	nents = (last_size)? 1: 0;
@@ -429,7 +432,7 @@ static int unpack_msg_head(uint8_t *rx_head, uint32_t rx_head_len, struct arpc_m
 		return -1;
 	}
 	index = arpc_read_tlv(&tlv_type, &req_len, &req_addr, rx_head);
-	if(index < 0 || tlv_type != ARPC_PROTO_MSG_INTER_HEAD || req_len != sizeof(struct arpc_msg_attr)){
+	if(index < 0 || tlv_type != ARPC_PROTO_MSG_INTER_HEAD){
 		return -1;
 	}
 	ret = unpack_msg_attr(req_addr, req_len, attr);
@@ -509,8 +512,7 @@ int move_msg_xio2arpc(struct xio_vmsg *xio_msg, struct arpc_vmsg *msg, struct ar
 		msg->vec_type = ARPC_VEC_TYPE_NONE;
 	}
 	if (attr){
-		attr->req_crc = proto.req_crc;
-		attr->rsp_crc = proto.rsp_crc;
+		*attr = proto;
 	}
 	ARPC_LOG_DEBUG("rx crc:0x%lx, cal crc:0x%lx", proto.req_crc, crc);
 	if (crc && proto.req_crc){
@@ -595,7 +597,7 @@ int convert_msg_arpc2xio(const struct arpc_vmsg *usr_msg, struct xio_vmsg *xio_m
 	}
 
 	attr->req_crc = crc;
-
+	attr->iovec_num = usr_msg->vec_num;
 	xio_msg->header.iov_len = 2 * sizeof(struct arpc_tlv) + sizeof(struct arpc_msg_attr) + usr_msg->head_len;
 	xio_msg->header.iov_base = arpc_mem_alloc(xio_msg->header.iov_len, NULL);
 	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!xio_msg->header.iov_base, data_null, "arpc_mem_alloc head buf fail.");

@@ -32,8 +32,8 @@
 extern "C" {
 #endif
 
-int process_rsp_header(struct xio_msg *rsp, struct arpc_connection *con);
-int process_rsp_data(struct xio_msg *rsp, int last_in_rxq, struct arpc_connection *con);
+int process_rsp_header(struct arpc_connection *con, struct xio_msg *rsp);
+int process_rsp_data(struct arpc_connection *con, struct xio_msg *rsp, int last_in_rxq);
 
 #ifdef __cplusplus
 }

@@ -30,17 +30,32 @@
 
 static int oneway_msg_async_deal(void *usr_ctx);
 
-int process_oneway_header(struct xio_msg *msg, struct oneway_ops *ops, uint64_t iov_max_len, void *usr_ctx)
+int process_oneway_header(struct arpc_connection *con, struct xio_msg *msg)
 {
 	struct proc_header_func head_ops;
+	struct arpc_msg_attr msg_attr = {0};
+	int ret;
+	struct timeval 		tx_time;
+	struct oneway_ops *ops;
+
+	ops = &(arpc_get_ops(con)->oneway_ops);
+
 	head_ops.alloc_cb = ops->alloc_cb;
 	head_ops.free_cb = ops->free_cb;
 	head_ops.proc_head_cb = ops->proc_head_cb;
 	ARPC_LOG_TRACE("get oneway msg head");
-	return create_xio_msg_usr_buf(msg, &head_ops, iov_max_len, usr_ctx);
+	ret = create_xio_msg_usr_buf(msg, &head_ops, arpc_get_max_iov_len(con), arpc_get_ops_ctx(con), &msg_attr);
+	tx_time.tv_sec = msg_attr.tx_sec;
+	tx_time.tv_usec = msg_attr.tx_usec;
+	statistics_per_time(&tx_time, &con->rx_ow_send, 5);
+	if(arpc_get_conn_type(con) == ARPC_CON_TYPE_SERVER && msg_attr.conn_id >= ARPC_CONN_ID_OFFSET && con->id != msg_attr.conn_id){
+		ARPC_LOG_NOTICE("server session modify conn id from[%u] to [%u]", con->id, msg_attr.conn_id);
+		con->id = msg_attr.conn_id;
+	}
+	return ret;
 }
 
-int process_oneway_data(struct xio_msg *req, struct oneway_ops *ops, int last_in_rxq, void *usr_ctx)
+int process_oneway_data(struct arpc_connection *con, struct xio_msg *req, int last_in_rxq)
 {
 	uint32_t					nents = vmsg_sglist_nents(&req->in);
 	uint32_t					i;
@@ -48,30 +63,31 @@ int process_oneway_data(struct xio_msg *req, struct oneway_ops *ops, int last_in
 	struct arpc_vmsg 			rev_iov;
 	uint32_t 				 	flags = 0;
 	struct arpc_thread_param 	*async_param;
+	struct oneway_ops 			*ops;
+	void 						*ops_ctx;
 
 	LOG_THEN_RETURN_VAL_IF_TRUE((!req), ARPC_ERROR, "req null.");
 	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(IS_SET(req->usr_flags, XIO_MSG_ERROR_DISCARD_DATA), free_data, "dicard data.");
 
 	memset(&rev_iov, 0, sizeof(struct arpc_vmsg));
 
-	//if (rev_iov.total_data < ARPC_MINI_IO_DATA_MAX_LEN){
-		//小IO，默认同步执行,这个还是让应用自己决定吧
-	//	SET_FLAG(req->usr_flags, METHOD_ARPC_PROC_SYNC);
-	//}
+	ops = &(arpc_get_ops(con)->oneway_ops);
+	ops_ctx = arpc_get_ops_ctx(con);
+
 	ARPC_LOG_TRACE("get oneway msg data");
 	ret = move_msg_xio2arpc(&req->in, &rev_iov, NULL);
 	LOG_THEN_RETURN_VAL_IF_TRUE((ret), ARPC_ERROR, "move_msg_xio2arpc fail.");
 
-	ret = destroy_xio_msg_usr_buf(req, ops->free_cb, usr_ctx);
+	ret = destroy_xio_msg_usr_buf(req, ops->free_cb, ops_ctx);
 	LOG_THEN_RETURN_VAL_IF_TRUE((ret), ARPC_ERROR, "destroy_xio_msg_usr_buf fail.");
 	if (IS_SET(req->usr_flags, METHOD_ARPC_PROC_SYNC) && ops->proc_data_cb) {
 		ARPC_LOG_TRACE("process rx oneway msg with sync.");
-		ret = ops->proc_data_cb(&rev_iov, &flags, usr_ctx);
+		ret = ops->proc_data_cb(&rev_iov, &flags, ops_ctx);
 		ARPC_LOG_TRACE("process rx oneway msg finished with sync, flag[0x%x].", flags);
 		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, free_data, "proc_data_cb  return fail.");
 
 		if(!IS_SET(flags, METHOD_CALLER_HIJACK_RX_DATA)){
-			free_msg_xio2arpc(&rev_iov, ops->free_cb, usr_ctx);
+			free_msg_xio2arpc(&rev_iov, ops->free_cb, ops_ctx);
 		}
 	}else {
 		ARPC_LOG_DEBUG("set proc_async_cb data.");
@@ -92,7 +108,7 @@ int process_oneway_data(struct xio_msg *req, struct oneway_ops *ops, int last_in
 		async_param->rsp_ctx = NULL;
 		async_param->req_msg = NULL;
 		async_param->rev_iov = rev_iov;
-		async_param->usr_ctx = usr_ctx;
+		async_param->usr_ctx = ops_ctx;
 		async_param->loop = oneway_msg_async_deal;
 
 		ret = post_to_async_thread(async_param);
@@ -103,7 +119,7 @@ int process_oneway_data(struct xio_msg *req, struct oneway_ops *ops, int last_in
 	return 0;
 
 free_data:
-	free_msg_xio2arpc(&rev_iov, ops->free_cb, usr_ctx);
+	free_msg_xio2arpc(&rev_iov, ops->free_cb, ops_ctx);
 	xio_release_msg(req);// 同步释放资源
 	return -1;
 }
