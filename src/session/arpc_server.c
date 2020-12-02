@@ -97,17 +97,17 @@ arpc_server_t arpc_server_create(const struct arpc_server_param *param)
 	server->msg_head_max_len = (param->opt.msg_head_max_len && param->opt.msg_head_max_len <= (2048))?
 								param->opt.msg_head_max_len:
 								get_option()->msg_head_max_len;
+	
+	ret = get_uri(&con_param, server->uri, URI_MAX_LEN);
+	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, error_1, "arpc_create_server fail");
+
+	work_num = (param->work_num > 2)? param->work_num:2; // 默认只有1个主线程,2个工作线程
+
 	pool_param.cpu_max_num = 16;
-	pool_param.thread_max_num = 32;							
+	pool_param.thread_max_num = work_num*3 + 2;//							
 	server->threadpool = tp_create_thread_pool(&pool_param);
 	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!server->threadpool, error_1, "tp_create_thread_pool null.");
 
-	ret = get_uri(&con_param, server->uri, URI_MAX_LEN);
-	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, error_1, "arpc_create_server fail");
-	work_num = tp_get_pool_idle_num(server->threadpool);
-	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(work_num < ARPC_MIN_THREAD_IDLE_NUM, error_1, "idle thread num is low then min [%u]", ARPC_MIN_THREAD_IDLE_NUM);
-	work_num = work_num - ARPC_MIN_THREAD_IDLE_NUM;
-	work_num = (param->work_num && param->work_num <= work_num)? param->work_num : 2; // 默认只有1个主线程,2个工作线程
 	for (i = 0; i < work_num; i++) {
 		con_param.ipv4.port++; // 端口递增
 		work_handle = arpc_create_xio_server_work(&con_param, server, &x_server_ops, i);

@@ -969,6 +969,15 @@ enum arpc_connection_type arpc_get_conn_type(struct arpc_connection *con)
 	return ctx->type;
 }
 
+void *arpc_get_conn_threadpool(struct arpc_connection *con)
+{
+	CONN_CTX(ctx, con, NULL);
+	if(ctx->session){
+		return ctx->session->threadpool;
+	}
+	return NULL;
+}
+
 static inline int alloc_common_msg(QUEUE* iter, uint32_t size, enum  arpc_msg_type type)
 {
 	int i;

@@ -110,7 +110,7 @@ arpc_session_handle_t arpc_client_create_session(const struct arpc_client_sessio
 	}
 
 	pool_param.cpu_max_num = 16;
-	pool_param.thread_max_num = (param->con_num > 0)?(param->con_num*5):12;	// 默认是1:5的关系					
+	pool_param.thread_max_num = (param->con_num > 0)?(param->con_num*2 + 2):12;	// 默认是1:3的关系					
 	session->threadpool = tp_create_thread_pool(&pool_param);
 
 	idle_thread_num = (param->con_num > 0)? param->con_num : 2; // 默认是两个链接

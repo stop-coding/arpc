@@ -258,6 +258,7 @@ struct arpc_thread_param{
 	struct arpc_vmsg 		rev_iov;
 	struct async_proc_ops	ops;
 	int (*loop)(void *usr_ctx);
+	void 					*threadpool;
 	void					*usr_ctx;
 };
 

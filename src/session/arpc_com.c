@@ -284,7 +284,7 @@ int post_to_async_thread(struct arpc_thread_param *param)
 	thread.loop = param->loop;
 	thread.stop = NULL;
 	thread.usr_ctx = (void*)param;
-	if(!tp_post_one_work(arpc_get_threadpool(), &thread, WORK_DONE_AUTO_FREE)){
+	if(!tp_post_one_work(param->threadpool, &thread, WORK_DONE_AUTO_FREE)){
 		ARPC_LOG_ERROR( "tp_post_one_work error.");
 		return -1;
 	}

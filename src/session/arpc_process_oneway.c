@@ -100,6 +100,7 @@ int process_oneway_data(struct arpc_connection *con, struct xio_msg *req, int la
 		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!async_param, free_data, "async_param is null, can't do async.");
 
 		memset(async_param, 0, sizeof(struct arpc_thread_param));
+		async_param->threadpool = arpc_get_conn_threadpool(con);
 		async_param->ops.alloc_cb = ops->alloc_cb;
 		async_param->ops.free_cb = ops->free_cb;
 		async_param->ops.proc_async_cb = NULL;
