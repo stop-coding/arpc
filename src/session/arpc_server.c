@@ -242,12 +242,12 @@ static int server_session_event(struct xio_session *session, struct xio_session_
 			if(ret) {
 				ARPC_LOG_ERROR("arpc_set_connect_status error");
 			}
-
+			ARPC_LOG_NOTICE("server work[%u](uri:%s) connect", work->affinity, work->uri);
 			break;
 		case XIO_SESSION_CONNECTION_TEARDOWN_EVENT:
 			if(event_data->conn_user_context != session_ctx->server){
 				con = (struct arpc_connection *)event_data->conn_user_context;
-				ARPC_LOG_TRACE("##### connection[%u][%p] teardown.", con->id, con);
+				ARPC_LOG_NOTICE("##### connection[%u][%p] teardown.", con->id, con);
 				ret = session_remove_con(session_fd, con);
 				LOG_ERROR_IF_VAL_TRUE(ret, "session_remove_con fail.");
 				arpc_set_disconnect_status(con);

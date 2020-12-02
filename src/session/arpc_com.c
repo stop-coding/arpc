@@ -146,9 +146,7 @@ int arpc_init_r(struct aprc_option *opt)
 	if (opt) {
 		set_user_option(opt, &g_param.opt);
 	}
-	p.cpu_max_num = g_param.opt.cpu_max_num;
-	p.thread_max_num = g_param.opt.thread_max_num;
-	g_param.thread_pool = tp_create_thread_pool(&p);
+	g_param.thread_pool = NULL;
 	arpc_mutex_unlock(&g_param.mutex);
 	xio_init();
 	set_xio_option(&g_param.opt);
@@ -167,9 +165,7 @@ int arpc_init()
 	}
 	g_param.is_init = 1;
 	g_param.opt.cpu_max_num = get_nprocs();
-	//p.cpu_max_num = g_param.opt.cpu_max_num;
-	//p.thread_max_num = g_param.opt.thread_max_num;
-	//g_param.thread_pool = tp_create_thread_pool(&p);
+	g_param.thread_pool = NULL;
 	arpc_mutex_unlock(&g_param.mutex);
 	xio_init();
 	set_xio_option(&g_param.opt);
@@ -187,19 +183,7 @@ void arpc_finish()
 		return;
 	}
 	g_param.is_init = 0;
-	while(retry--){
-		ret = tp_destroy_thread_pool(&g_param.thread_pool);
-		if(!ret) {
-			break;
-		}
-	}
-
 	xio_shutdown();
-}
-
-tp_handle arpc_get_threadpool()
-{
-	return g_param.thread_pool;
 }
 
 uint32_t arpc_thread_max_num()
