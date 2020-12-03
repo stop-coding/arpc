@@ -59,6 +59,14 @@ enum arpc_ctrl_attr{
 };
 
 /*!
+ *  @brief  arpc版本
+ *
+ *  @return  char, version
+ *
+ */
+const char *arpc_version();
+
+/*!
  *  @brief  arpc消息框架全局初始化，支持参数设置
  *
  *  @param[in] opt  arpc参数

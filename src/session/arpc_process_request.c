@@ -26,6 +26,7 @@
 #include "arpc_request.h"
 #include "arpc_response.h"
 
+static const int32_t SEND_RSP_END_MAX_TIME_MS = 2*1000;
 static int request_msg_async_deal(void *usr_ctx);
 
 int process_request_header(struct arpc_connection *con, struct xio_msg *msg)
@@ -60,7 +61,7 @@ int process_request_data(struct arpc_connection *con, struct xio_msg *req, int l
 	uint32_t			i;
 	struct arpc_vmsg 	rev_iov;
 	struct arpc_rsp 	usr_rsp_param;
-	struct arpc_common_msg *rsp_hanlde;
+	struct arpc_common_msg *rsp_msg;
 	struct arpc_rsp_handle	*rsp_fd_ex;
 	struct arpc_thread_param *async_param;
 	int						ret;
@@ -83,14 +84,14 @@ int process_request_data(struct arpc_connection *con, struct xio_msg *req, int l
 	ret = destroy_xio_msg_usr_buf(req, ops->free_cb, usr_ctx);
 	LOG_THEN_RETURN_VAL_IF_TRUE((ret), ARPC_ERROR, "destroy_xio_msg_usr_buf fail.");
 
-	rsp_hanlde = get_common_msg(con, ARPC_MSG_TYPE_RSP);
-	LOG_THEN_RETURN_VAL_IF_TRUE(!rsp_hanlde, ARPC_ERROR, "rsp_hanlde alloc null.");
-	rsp_fd_ex = (struct arpc_rsp_handle*)rsp_hanlde->ex_data;
+	rsp_msg = get_common_msg(con, ARPC_MSG_TYPE_RSP);
+	LOG_THEN_RETURN_VAL_IF_TRUE(!rsp_msg, ARPC_ERROR, "rsp_msg alloc null.");
+	rsp_fd_ex = (struct arpc_rsp_handle*)rsp_msg->ex_data;
 	rsp_fd_ex->x_rsp_msg = req;//保存回复的结构体
-	rsp_hanlde->attr.rsp_crc = attr.req_crc;//请求保存在回复体里
-	rsp_hanlde->attr.req_crc = 0;
+	rsp_msg->attr.rsp_crc = attr.req_crc;//请求保存在回复体里
+	rsp_msg->attr.req_crc = 0;
 	memset(&usr_rsp_param, 0, sizeof(struct arpc_rsp));
-	usr_rsp_param.rsp_fd = (void *)rsp_hanlde;
+	usr_rsp_param.rsp_fd = (void *)rsp_msg;
 
 	if(IS_SET(req->usr_flags, METHOD_ARPC_PROC_SYNC) && ops->proc_data_cb){
 		ARPC_LOG_TRACE("process rx request msg with async.");
@@ -122,7 +123,7 @@ int process_request_data(struct arpc_connection *con, struct xio_msg *req, int l
 		async_param->ops.proc_async_cb = ops->proc_async_cb;
 		async_param->ops.release_rsp_cb = ops->release_rsp_cb;
 		async_param->ops.proc_oneway_async_cb = NULL;
-		async_param->rsp_ctx = rsp_hanlde;
+		async_param->rsp_ctx = rsp_msg;
 		async_param->rev_iov = rev_iov;
 		async_param->req_msg = NULL;
 		async_param->usr_ctx = usr_ctx;
@@ -140,20 +141,19 @@ free_user_buf:
 	free_msg_xio2arpc(&rev_iov, ops->free_cb, usr_ctx);
 
 do_respone:	
-	/* attach request to response */
+	/* 框架内回复，则不需要通知模式，也不需要加锁 */
 	ARPC_LOG_TRACE("do respone request msg.");
 	gettimeofday(&tx_time, NULL);	// 线程安全
 
-	rsp_hanlde->attr.tx_sec= tx_time.tv_sec;
-	rsp_hanlde->attr.tx_usec= tx_time.tv_usec;
-	rsp_hanlde->attr.conn_id = con->id;
+	rsp_msg->attr.tx_sec= tx_time.tv_sec;
+	rsp_msg->attr.tx_usec= tx_time.tv_usec;
+	rsp_msg->attr.conn_id = con->id;
 
-	ret = arpc_init_response(rsp_hanlde);
+	ret = arpc_init_response(rsp_msg);
 	LOG_ERROR_IF_VAL_TRUE(ret, "arpc_init_response fail.");
-	if(!ret){
-		ret = arpc_connection_async_send(rsp_hanlde->conn, rsp_hanlde);
-		LOG_ERROR_IF_VAL_TRUE(ret, "arpc_connection_async_send fail.");
-	}
+	ret = xio_send_response(rsp_msg->tx_msg);
+	LOG_ERROR_IF_VAL_TRUE(ret, "xio_send_response fail.");
+
 	return ret;
 }
 
@@ -162,7 +162,7 @@ static int request_msg_async_deal(void *usr_ctx)
 	struct arpc_thread_param *async = (struct arpc_thread_param *)usr_ctx;
 	struct arpc_rsp rsp;
 	int ret;
-	struct arpc_common_msg *rsp_fd;
+	struct arpc_common_msg *rsp_msg;
 	struct arpc_rsp_handle	*rsp_fd_ex;
 	struct timeval 		tx_time;
 
@@ -170,9 +170,9 @@ static int request_msg_async_deal(void *usr_ctx)
 	LOG_THEN_RETURN_VAL_IF_TRUE(!async->ops.proc_async_cb, ARPC_ERROR, "request proc_async_cb null.");
 	LOG_THEN_RETURN_VAL_IF_TRUE(!async->rsp_ctx, ARPC_ERROR, "request rsp context is null.");
 
-	rsp_fd  = (struct arpc_common_msg *)async->rsp_ctx;
+	rsp_msg  = (struct arpc_common_msg *)async->rsp_ctx;
 	memset(&rsp, 0, sizeof (struct arpc_rsp));						
-	rsp.rsp_fd = (void*)rsp_fd;
+	rsp.rsp_fd = (void*)rsp_msg;
 
 	ARPC_LOG_TRACE("process request msg with async.");
 	ret = async->ops.proc_async_cb(&async->rev_iov, &rsp, async->usr_ctx);
@@ -185,21 +185,26 @@ static int request_msg_async_deal(void *usr_ctx)
 		async->rev_iov.vec = NULL;
 	}
 
-	rsp_fd_ex = (struct arpc_rsp_handle*)rsp_fd->ex_data;
+	rsp_fd_ex = (struct arpc_rsp_handle*)rsp_msg->ex_data;
 	rsp_fd_ex->rsp_usr_iov = rsp.rsp_iov;
 	rsp_fd_ex->rsp_usr_ctx = rsp.rsp_ctx;
 	rsp_fd_ex->release_rsp_cb = async->ops.release_rsp_cb;
 
 	if (!IS_SET(rsp.flags, METHOD_CALLER_ASYNC)) {
 		gettimeofday(&tx_time, NULL);	// 线程安全
-		rsp_fd->attr.tx_sec= tx_time.tv_sec;
-		rsp_fd->attr.tx_usec= tx_time.tv_usec;
-		ret = arpc_init_response(rsp_fd);
-		LOG_ERROR_IF_VAL_TRUE(ret, "arpc_do_respone fail.");
-		if(!ret){
-			ret = arpc_connection_async_send(rsp_fd->conn, rsp_fd);
-			LOG_ERROR_IF_VAL_TRUE(ret, "arpc_do_respone fail.");
+		arpc_cond_lock(&rsp_msg->cond);
+		rsp_msg->attr.tx_sec= tx_time.tv_sec;
+		rsp_msg->attr.tx_usec= tx_time.tv_usec;
+		ret = arpc_init_response(rsp_msg);
+		LOG_ERROR_IF_VAL_TRUE(ret, "arpc_init_response fail.");
+		ret = arpc_connection_async_send(rsp_msg->conn, rsp_msg);
+		if(!ret) {
+			ret = arpc_cond_wait_timeout(&rsp_msg->cond, SEND_RSP_END_MAX_TIME_MS); // 默认等待
+			LOG_ERROR_IF_VAL_TRUE(ret, "rsp send timeout fail, conn[%u], msg[%p].", rsp_msg->conn->id, rsp_msg);
+		}else{
+			ARPC_LOG_ERROR("arpc_connection_async_send fail, conn[%u], msg[%p].", rsp_msg->conn->id, rsp_msg);
 		}
+		arpc_cond_unlock(&rsp_msg->cond);
 	}
 	SAFE_FREE_MEM(async->rev_iov.head);
 	SAFE_FREE_MEM(async);

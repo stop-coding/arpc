@@ -593,6 +593,7 @@ exit_thread:
 		ctx->xio_con_ctx = NULL;
 	}
 	ctx->flags = 0;
+	SET_FLAG(ctx->flags, ARPC_CONN_ATTR_TELL_LIVE);
 	prctl(PR_SET_NAME, "share_thread");
 	arpc_cond_notify(&ctx->cond);
 	ARPC_LOG_NOTICE("xio connection[%u] on thread[%lu] exit now.", con->id,  pthread_self());
@@ -677,6 +678,7 @@ static void arpc_tx_event_callback(struct arpc_connection *usr_conn)
 		}
 		arpc_mutex_unlock(&con->msg_lock);
 		ARPC_LOG_TRACE("xio send msg on client, msg type:%d", msg->type);
+		arpc_cond_lock(&msg->cond);
 		switch (msg->type)
 		{
 			case ARPC_MSG_TYPE_REQ:
@@ -687,11 +689,13 @@ static void arpc_tx_event_callback(struct arpc_connection *usr_conn)
 			case ARPC_MSG_TYPE_RSP:
 				usr_conn->tx_rsp_count++;
 				ret = xio_send_response(msg->tx_msg);
+				arpc_cond_notify(&msg->cond);
 				statistics_per_time(&msg->now, &usr_conn->tx_rsp_cmit, 3);
 				break;
 			case ARPC_MSG_TYPE_OW:
 				usr_conn->tx_ow_count++;
 				ret = xio_send_msg(con->xio_con, msg->tx_msg);
+				arpc_cond_notify(&msg->cond);
 				statistics_per_time(&msg->now, &usr_conn->tx_ow_cmit, 3);
 				break;
 			default:
@@ -699,6 +703,7 @@ static void arpc_tx_event_callback(struct arpc_connection *usr_conn)
 				ARPC_LOG_ERROR("unkown msg type[%d]", msg->type);
 				break;
 		}
+		arpc_cond_unlock(&msg->cond);
 		ARPC_LOG_TRACE("xio send msg end, msg type:%d", msg->type);
 		if(ret){
 			ARPC_LOG_ERROR("send msg[%d] fail, errno code[%u], err msg[%s].", msg->type, xio_errno(), xio_strerror(xio_errno()));

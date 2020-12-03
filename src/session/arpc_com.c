@@ -26,6 +26,7 @@
 #include "arpc_response.h"
 #include "crc64.h"
 
+static const char *version = "v1.0.0";
 struct aprc_paramter{
 	uint16_t is_init;
 	uint16_t pad;
@@ -33,6 +34,11 @@ struct aprc_paramter{
 	struct arpc_mutex mutex;
 	struct aprc_option opt;
 };
+
+const char *arpc_version()
+{
+	return xio_version();
+}
 
 static struct aprc_paramter g_param= {
 	.is_init        = 0,

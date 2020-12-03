@@ -141,7 +141,7 @@ arpc_session_handle_t arpc_client_create_session(const struct arpc_client_sessio
 		ret = arpc_session_connect_for_client(session, 3*1000);//等待至少一条链路可用
 		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, error_2, "client session connect server[%s] fail", client_ctx->uri);
 	}
-
+	ARPC_LOG_NOTICE("ARPC version[%s].", arpc_version());
 	ARPC_LOG_NOTICE("Create session[%p] success, work thread num[%u], rx num[%u]!!", session, idle_thread_num, rx_con_num);
 	return (arpc_session_handle_t)session;
 

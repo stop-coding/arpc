@@ -204,10 +204,9 @@ int arpc_send_oneway_msg(const arpc_session_handle_t fd, struct arpc_vmsg *send,
 	ret = convert_msg_arpc2xio(send, &req->out, &req_msg->attr);
 	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, free_common_msg, "convert xio msg fail.");
 	req->user_context = req_msg;
-	if (!ow_msg->clean_send_cb){
+	/*if (!ow_msg->clean_send_cb){
 		req->flags |= XIO_MSG_FLAG_IMM_SEND_COMP;
-	}
-
+	}*/
 	arpc_cond_lock(&req_msg->cond);
 	while(send_cnt < 1) {
 		send_cnt++;
@@ -224,11 +223,8 @@ int arpc_send_oneway_msg(const arpc_session_handle_t fd, struct arpc_vmsg *send,
 	if (!ow_msg->clean_send_cb){
 		ret = arpc_cond_wait_timeout(&req_msg->cond, SEND_ONEWAY_END_MAX_TIME); // 默认等待
 		arpc_cond_unlock(&req_msg->cond);
-		if (!ret){
-			free_msg_arpc2xio(&req->out);
-			put_common_msg(req_msg);	//un lock
-		}else{
-			free_msg_arpc2xio(&req->out);
+		free_msg_arpc2xio(&req->out);
+		if (ret){
 			ARPC_LOG_ERROR("wait oneway msg send complete timeout fail, msg keep."); // TODO 释放超时的资源
 		}
 	}else{
@@ -263,7 +259,6 @@ int arpc_oneway_send_complete(struct arpc_common_msg *ow_msg)
 		free_msg_arpc2xio(&ow_msg->xio_msg.out);
 		put_common_msg(ow_msg);	//un lock
 	}else{
-		arpc_cond_notify(&ow_msg->cond);
 		arpc_cond_unlock(&ow_msg->cond);
 	}
 	ARPC_LOG_DEBUG("send end complete.");

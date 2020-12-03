@@ -38,7 +38,7 @@ endif()
 set(VERSION_FILE_PATH ${XIO_ROOT_PATH})
 
 #版本
-set(VERSION_NUM "xio_1.7.0_release")
+set(VERSION_NUM "v1.0.0")
 
 set(VERSION_MSG "const char XIO_VERSION_STRING[] = \"${VERSION_NUM}\"\;")
 file(WRITE ${VERSION_FILE_PATH}/version.c ${VERSION_MSG})
