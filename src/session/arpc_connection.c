@@ -610,11 +610,9 @@ static void arpc_conn_event_callback(int fd, int events, void *data)
 
 	ret = arpc_cond_lock(&ctx->cond);
 	LOG_THEN_RETURN_VAL_IF_TRUE(ret, ;, "tx event  arpc_cond_lock fail.");
-	SET_FLAG(ctx->flags, ARPC_CONN_EVENT_RUN);// 设置标志位，减少触发响应
 	ctx->event_cnt++;
 	if ((ctx->event_cnt%5000) == 0){
 		(void)eventfd_read(ctx->event_fd, &count);
-		ctx->event_cnt = 0;
 	}
 	if (IS_SET(ctx->flags, ARPC_CONN_ATTR_EXIT|ARPC_CONN_ATTR_SET_EXIT)){
 		ARPC_LOG_NOTICE("conn context[%d] to exit", ctx->status);
@@ -659,7 +657,6 @@ static void arpc_tx_event_callback(struct arpc_connection *usr_conn)
 		arpc_mutex_lock(&con->msg_lock);
 		if(QUEUE_EMPTY(&con->q_tx_msg) || max_tx_send < 0){
 			con->tx_msg_num = 0;
-			CLR_FLAG(con->flags, ARPC_CONN_EVENT_RUN);
 			arpc_mutex_unlock(&con->msg_lock);
 			break;
 		}
@@ -679,18 +676,15 @@ static void arpc_tx_event_callback(struct arpc_connection *usr_conn)
 		switch (msg->type)
 		{
 			case ARPC_MSG_TYPE_REQ:
-				usr_conn->tx_req_count++;
 				ret = xio_send_request(con->xio_con, msg->tx_msg);
 				statistics_per_time(&msg->now, &usr_conn->tx_req_cmit, 3);
 				break;
 			case ARPC_MSG_TYPE_RSP:
-				usr_conn->tx_rsp_count++;
 				ret = xio_send_response(msg->tx_msg);
 				arpc_cond_notify(&msg->cond);
 				statistics_per_time(&msg->now, &usr_conn->tx_rsp_cmit, 3);
 				break;
 			case ARPC_MSG_TYPE_OW:
-				usr_conn->tx_ow_count++;
 				ret = xio_send_msg(con->xio_con, msg->tx_msg);
 				arpc_cond_notify(&msg->cond);
 				statistics_per_time(&msg->now, &usr_conn->tx_ow_cmit, 3);
@@ -882,10 +876,10 @@ int arpc_connection_async_send(const struct arpc_connection *conn, struct arpc_c
 	msg->status = ARPC_MSG_STATUS_TX;
 	QUEUE_INSERT_TAIL(&ctx->q_tx_msg, &msg->q);
 	ctx->tx_msg_num++;
-	if(!IS_SET(ctx->flags, ARPC_CONN_EVENT_RUN)) {
-		ret = eventfd_write(ctx->event_fd, 1);//触发发送事件
-		LOG_ERROR_IF_VAL_TRUE(ret < 0, "ret[%d], write fd[%d] fail", ret, ctx->event_fd);
-	}
+
+	ret = eventfd_write(ctx->event_fd, 1);//触发发送事件
+	LOG_ERROR_IF_VAL_TRUE(ret < 0, "ret[%d], write fd[%d] fail", ret, ctx->event_fd);
+
 	arpc_mutex_unlock(&ctx->msg_lock);
 
 	arpc_cond_unlock(&ctx->cond);
@@ -1007,6 +1001,7 @@ struct arpc_common_msg *get_common_msg(const struct arpc_connection *conn, enum 
 	switch (type)
 	{
 	case ARPC_MSG_TYPE_REQ:
+		((struct arpc_connection *)conn)->tx_req_count++;
 		ret = alloc_common_msg(&ctx->q_req_msg, sizeof(struct arpc_request_handle), type);
 		if (ret) {
 			ARPC_LOG_ERROR("alloc_common_msg for req fail.");
@@ -1015,6 +1010,7 @@ struct arpc_common_msg *get_common_msg(const struct arpc_connection *conn, enum 
 		iter = QUEUE_HEAD(&ctx->q_req_msg);
 		break;
 	case ARPC_MSG_TYPE_RSP:
+		((struct arpc_connection *)conn)->tx_rsp_count++;
 		ret = alloc_common_msg(&ctx->q_rsp_msg, sizeof(struct arpc_rsp_handle), type);
 		if (ret) {
 			ARPC_LOG_ERROR("alloc_common_msg for rsp fail.");
@@ -1023,6 +1019,7 @@ struct arpc_common_msg *get_common_msg(const struct arpc_connection *conn, enum 
 		iter = QUEUE_HEAD(&ctx->q_rsp_msg);
 		break;
 	case ARPC_MSG_TYPE_OW:
+		((struct arpc_connection *)conn)->tx_ow_count++;
 		ret = alloc_common_msg(&ctx->q_ow_msg, sizeof(struct arpc_oneway_handle), type);
 		if (ret) {
 			ARPC_LOG_ERROR("alloc_common_msg for ow fail.");

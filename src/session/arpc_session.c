@@ -478,7 +478,7 @@ static inline const char *get_type_str(enum arpc_session_type type)
 #define SESSION_STATUS_SHOW_HEAD\
  "\n  ### session:%p   session type:%s  conn-num:%u  timeout-ms:%d  status:%d  data-max:%lu head-max:%u iov-max:%u ###\n"\
  "*conn-id     "\
- "*tx-req:cnt/cmit/send        *tx-rsp:cnt/cmit/send        *tx-ow:cnt/cmit/send         "\
+ "*tx-req:cnt*2/cmit/send      *tx-rsp:cnt*2/cmit/send      *tx-ow:cnt*2/cmit/send       "\
  "*rx-req:cnt/rx  /cb          *rx-rsp:cnt/rx  /cb          *rx-ow:cnt/rx  /cb   \n"
 
 #define SESSION_STATUS_SHOW\
