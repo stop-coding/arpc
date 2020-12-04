@@ -710,7 +710,7 @@ static void arpc_tx_event_callback(struct arpc_connection *usr_conn)
 		QUEUE_INIT(&msg->q);
 		msg->status = ARPC_MSG_STATUS_USED;
 		QUEUE_INSERT_TAIL(&con->q_used_msg, &msg->q);
-		con->tx_msg_num--;
+		if(con->tx_msg_num > 0) con->tx_msg_num--;
 		arpc_mutex_unlock(&con->msg_lock);
 		max_tx_send--;
 	}
