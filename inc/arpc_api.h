@@ -489,6 +489,14 @@ enum arpc_session_status{
  */
 enum arpc_session_status arpc_get_session_status(const arpc_session_handle_t fd);
 
+/*!
+ *  @brief  打印session信息
+ *
+ *  @param[in] fd  session句柄
+ *  @return  arpc_session_status;
+ *
+ */
+void arpc_session_info(const arpc_session_handle_t fd);
 #endif
 
 

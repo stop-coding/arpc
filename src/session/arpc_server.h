@@ -64,6 +64,7 @@ struct arpc_server_handle{
 	void 		*threadpool;
 	uint32_t 	work_num;
 	uint32_t	iov_max_len;
+	struct arpc_cond  cond;
 	struct arpc_mutex  lock;
 	struct arpc_session_ops	 ops;
 	struct xio_server		*server;
@@ -77,6 +78,7 @@ struct arpc_server_handle{
 	uint64_t	msg_data_max_len;
 	uint32_t	msg_iov_max_len;
 	uint32_t		is_stop;
+	uint32_t 	session_num;
 	char    ex_ctx[0];			/* exterd handle */
 };
 

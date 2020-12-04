@@ -43,7 +43,8 @@ enum arpc_log_level{
 	ARPC_LOG_LEVEL_E_MAX,
 };
 void arpc_vlog(enum arpc_log_level level, const char *module, const char *file,unsigned line, const char *function, const char *fmt, ...);
-
+int32_t get_log_status();
+void update_log_status(const char *module);
 
 #define BASE_LOG_ERROR(format, arg...) \
 		arpc_vlog(ARPC_LOG_LEVEL_E_ERROR, "ARPC", __FILE__, __LINE__, __FUNCTION__, format, ##arg);

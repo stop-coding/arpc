@@ -63,6 +63,47 @@ static struct xio_session_ops x_server_ops = {
 	.on_msg_error				=  &message_error
 };
 
+#define SERVER_STATUS_SHOW "\n ### server:%p    work-num:%u    online-session:%u    ### \n"
+
+static int arpc_server_deamon(void *thread_ctx)
+{
+	struct arpc_server_handle *server = (struct arpc_server_handle *)thread_ctx;
+	//cpu_set_t		cpuset;
+	QUEUE* iter = NULL;
+	int ret;
+	char thread_name[16+1] ={0};
+	struct arpc_session_handle *session;
+	prctl(PR_SET_NAME, "server_deamon");
+
+	ret = arpc_cond_lock(&server->cond);
+	LOG_THEN_RETURN_VAL_IF_TRUE(ret, -1, "arpc_cond_lock server[%p] fail", server);
+
+	while(!server->is_stop){
+		arpc_cond_wait_timeout(&server->cond, 15*1000);
+		if (server->is_stop) {
+			break;
+		}
+		arpc_update_log_status();
+		ret = arpc_mutex_lock(&server->lock);
+		if(ret) {
+			ARPC_LOG_ERROR("deamon lock server[%p] fail, stop:%u,.", server, server->is_stop);
+			break;
+		}
+		ARPC_LOG_STATUS(SERVER_STATUS_SHOW, server, server->work_num, server->session_num);
+		QUEUE_FOREACH_VAL(&server->q_session, iter, 
+		{
+			session = QUEUE_DATA(iter, struct arpc_session_handle, q);
+			print_session_status(session, NULL);
+		});
+		ARPC_LOG_STATUS(" ### -----------------------------------------    ### \n\n");
+		arpc_mutex_unlock(&server->lock);
+		
+	}
+	arpc_cond_unlock(&server->cond);
+	ARPC_LOG_NOTICE("deamon exit[%lu].", pthread_self());
+	return 0;
+} 
+
 arpc_server_t arpc_server_create(const struct arpc_server_param *param)
 {
 	int ret = 0;
@@ -73,6 +114,7 @@ arpc_server_t arpc_server_create(const struct arpc_server_param *param)
 	struct arpc_con_info con_param;
 	uint32_t work_num = 0;
 	struct tp_param pool_param;
+	struct tp_thread_work thread;
 	/* handle*/
 	server = arpc_create_server(0);
 	LOG_THEN_RETURN_VAL_IF_TRUE(!server, NULL, "arpc_create_server fail");
@@ -104,7 +146,7 @@ arpc_server_t arpc_server_create(const struct arpc_server_param *param)
 	work_num = (param->work_num > 2)? param->work_num:2; // 默认只有1个主线程,2个工作线程
 
 	pool_param.cpu_max_num = 16;
-	pool_param.thread_max_num = work_num*3 + 2;//							
+	pool_param.thread_max_num = work_num*3 + 2 + 1;//							
 	server->threadpool = tp_create_thread_pool(&pool_param);
 	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!server->threadpool, error_1, "tp_create_thread_pool null.");
 
@@ -127,6 +169,12 @@ arpc_server_t arpc_server_create(const struct arpc_server_param *param)
 
 	ARPC_LOG_NOTICE("ARPC version[%s].", arpc_version());
 	ARPC_LOG_NOTICE("Create main server[%p] success, work server num[%u].", server, server->work_num);
+
+	thread.loop = &arpc_server_deamon;
+	thread.stop = NULL;
+	thread.usr_ctx = (void*)server;
+
+	tp_post_one_work(server->threadpool, &thread, WORK_DONE_AUTO_FREE);
 
 	return (arpc_server_t)server;
 
@@ -151,7 +199,7 @@ int arpc_server_destroy(arpc_server_t *fd)
 	void *thread_pool;
 	LOG_THEN_RETURN_VAL_IF_TRUE(!fd, -1, "arpc_create_server fail");
 	server = (struct arpc_server_handle *)(*fd);
-
+	server->is_stop = 1;
 	if (server->server_ctx) 
 		xio_context_destroy(server->server_ctx);
 	server->server_ctx = NULL;
@@ -179,11 +227,11 @@ int arpc_server_loop(arpc_server_t fd, int32_t timeout_ms)
 	ARPC_LOG_NOTICE("server run on the thread[%lu].", pthread_self());
 	for(;;){	
 		if (xio_context_run_loop(server->server_ctx, timeout_ms) < 0)
-			ARPC_LOG_NOTICE("xio error msg: %s.", xio_strerror(xio_errno()));
+			ARPC_LOG_ERROR("xio error msg: %s.", xio_strerror(xio_errno()));
 		ARPC_LOG_NOTICE("xio server stop loop pause...");
 		break;
 	}
-
+	server->is_stop = 1;
 	ARPC_LOG_NOTICE("server run thread[%lu] exit signaled.", pthread_self());
 	return -1;
 }
@@ -329,6 +377,7 @@ static int server_on_new_session(struct xio_session *session,struct xio_new_sess
 		assert(tlv_type == ARPC_PROTO_NEW_SESSION);
 		assert(req_len == sizeof(struct arpc_proto_new_session));
 		unpack_new_session(req_addr, sizeof(struct arpc_proto_new_session), &new_req);
+		ARPC_LOG_NOTICE("max_iov_len[%u], data max:%lu.", new_req.max_iov_len, new_req.max_data_len);
 	}
 
 	client.client_data.data = NULL;//todo
@@ -383,7 +432,6 @@ static int server_on_new_session(struct xio_session *session,struct xio_new_sess
 			}
 			break;
 		});
-		new_session->conn_num = work_num;
 		xio_accept(session, (const char **)uri_vec, work_num, param.rsp_data, param.rsp_data_len); 
 		for (i = 0; i < work_num; i++) {
 			arpc_mem_free(uri_vec[i], NULL);
@@ -397,7 +445,7 @@ static int server_on_new_session(struct xio_session *session,struct xio_new_sess
 	ret = server_insert_session(server_fd, new_session);
 	LOG_ERROR_IF_VAL_TRUE(ret, "server_insert_session fail.");
 	server_fd->new_session_end((arpc_session_handle_t)new_session, &param, server_fd->usr_context);
-	ARPC_LOG_NOTICE("ARPC version[%s].", arpc_version());
+	ARPC_LOG_NOTICE("ARPC version[%s], data max:%lu.", arpc_version(), new_session->msg_data_max_len);
 	ARPC_LOG_NOTICE("create new session[%p] success, client[%s:%u].", new_session, ipv4->ipv4.ip, ipv4->ipv4.port);
 	return 0;
 reject:
@@ -423,12 +471,21 @@ struct arpc_server_handle *arpc_create_server(uint32_t ex_ctx_size)
 	}
 	memset(svr, 0, sizeof(struct arpc_server_handle) + ex_ctx_size);
 	ret = arpc_mutex_init(&svr->lock); /* 初始化互斥锁 */
-	LOG_THEN_RETURN_VAL_IF_TRUE(ret, NULL, "arpc_mutex_init fail.");
+	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, free_buf, "arpc_mutex_init fail.");
+
+	ret = arpc_cond_init(&svr->cond); 
+	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, free_mutex, "arpc_cond_init fail.");
+
 	QUEUE_INIT(&svr->q_session);
 	QUEUE_INIT(&svr->q_work);
 	svr->iov_max_len = IOV_DEFAULT_MAX_LEN;
 	svr->threadpool = NULL;
 	return svr;
+free_mutex:
+	arpc_mutex_destroy(&svr->lock);
+free_buf:
+	SAFE_FREE_MEM(svr);
+	return NULL;
 }
 
 int arpc_destroy_server(struct arpc_server_handle* svr)
@@ -450,6 +507,16 @@ int arpc_destroy_server(struct arpc_server_handle* svr)
 	LOG_THEN_RETURN_VAL_IF_TRUE(ret, -1, "arpc_mutex_unlock fail.");
 
 	ret = arpc_mutex_destroy(&svr->lock); /* 初始化互斥锁 */
+	LOG_THEN_RETURN_VAL_IF_TRUE(ret, -1, "arpc_mutex_destroy fail.");
+
+	svr->is_stop = 1;
+
+	arpc_cond_lock(&svr->cond);
+	arpc_cond_notify_all(&svr->cond);
+	arpc_cond_unlock(&svr->cond);
+	arpc_sleep(2);
+
+	ret = arpc_cond_destroy(&svr->cond); /* 初始化互斥锁 */
 	LOG_THEN_RETURN_VAL_IF_TRUE(ret, -1, "arpc_mutex_destroy fail.");
 	
 	SAFE_FREE_MEM(svr);
@@ -562,7 +629,8 @@ int server_insert_session(struct arpc_server_handle *server, struct arpc_session
 	int ret;
 	ret = arpc_mutex_lock(&server->lock);
 	LOG_THEN_RETURN_VAL_IF_TRUE(ret, -1, "arpc_mutex_lock server[%p] fail.", server);
-	QUEUE_INSERT_TAIL(&server->q_work, &session->q);
+	QUEUE_INSERT_TAIL(&server->q_session, &session->q);
+	server->session_num++;
 	arpc_mutex_unlock(&server->lock);
 	return 0;
 }
@@ -574,6 +642,7 @@ int server_remove_session(struct arpc_server_handle *server, struct arpc_session
 	LOG_THEN_RETURN_VAL_IF_TRUE(ret, -1, "arpc_mutex_lock server[%p] fail.", server);
 	QUEUE_REMOVE(&session->q);
 	QUEUE_INIT(&session->q);
+	server->session_num--;
 	arpc_mutex_unlock(&server->lock);
 	return 0;
 }

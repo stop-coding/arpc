@@ -83,7 +83,6 @@ int msg_data_process(struct xio_session *session,struct xio_msg *msg, int last_i
 		default:
 			break;
 	}
-	print_session_status(arpc_get_conn_session(conn), &(conn->rx_now));
 	return ret;
 }
 

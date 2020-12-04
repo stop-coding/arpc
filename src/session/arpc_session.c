@@ -50,8 +50,11 @@ struct arpc_session_handle *arpc_create_session(enum arpc_session_type type, uin
 	ret = arpc_cond_init(&session->cond); /* 初始化信号锁 */
 	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, free_buf, "arpc_cond_init fail.");
 
+	ret = arpc_cond_init(&session->deamon_cond); /* 初始化信号锁 */
+	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, free_cond, "arpc_cond_init fail.");
+
 	ret = arpc_mutex_init(&session->lock); /* 初始化信号锁 */
-	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, free_buf, "arpc_mutex_init fail.");
+	LOG_THEN_GOTO_TAG_IF_VAL_TRUE(ret, free_deamon, "arpc_mutex_init fail.");
 
 	QUEUE_INIT(&session->q);
 	QUEUE_INIT(&session->q_con);
@@ -60,8 +63,12 @@ struct arpc_session_handle *arpc_create_session(enum arpc_session_type type, uin
 	session->is_close = 0;
 	session->status = ARPC_SES_STA_INIT;
 	session->conn_timeout_ms = XIO_INFINITE;
+	session->conn_num = 0;
 	return session;
-
+free_deamon:
+	arpc_cond_destroy(&session->deamon_cond);
+free_cond:
+	arpc_cond_destroy(&session->cond);
 free_buf:
 	SAFE_FREE_MEM(session);
 	return NULL;
@@ -126,6 +133,13 @@ int arpc_destroy_session(struct arpc_session_handle* session, int64_t timeout_ms
 
 	ret = arpc_mutex_destroy(&session->lock);
 	LOG_ERROR_IF_VAL_TRUE(ret, "arpc_mutex_destroy fail.");
+	arpc_cond_lock(&session->deamon_cond);
+	arpc_cond_notify_all(&session->deamon_cond);
+	arpc_cond_unlock(&session->deamon_cond);
+	arpc_usleep(1000);
+
+	ret = arpc_cond_destroy(&session->deamon_cond);
+	LOG_ERROR_IF_VAL_TRUE(ret, "arpc_cond_destroy fail.");
 
 	SAFE_FREE_MEM(session);
 	return 0;
@@ -476,17 +490,21 @@ void print_session_status(struct arpc_session_handle *session, struct timeval *n
 	QUEUE* iter;
 	int try_time = 0;
 	struct arpc_connection *con = NULL;
-	if (!session || !now) {
+	if (!session) {
 		return;
 	}
 
-	if ((session->interval.tv_sec + 3 >= now->tv_sec)) {
+	if (now && (session->interval.tv_sec + 3 >= now->tv_sec)) {
 		return;
 	}
 
 	ret = arpc_cond_lock(&session->cond);
 	LOG_THEN_RETURN_VAL_IF_TRUE(ret, ;, "arpc_mutex_lock session[%p] fail.", session);
-	session->interval = *now;
+	if(now){
+		session->interval = *now;
+	}else{
+		session->interval.tv_sec = 0;
+	}
 	ARPC_LOG_STATUS(SESSION_STATUS_SHOW_HEAD, session, get_type_str(session->type), session->conn_num, 
 					session->conn_timeout_ms, session->status,
 					session->msg_data_max_len, session->msg_head_max_len, session->msg_iov_max_len);
@@ -506,3 +524,17 @@ void print_session_status(struct arpc_session_handle *session, struct timeval *n
 	arpc_cond_unlock(&session->cond);
 	return;
 } 
+
+enum arpc_session_status arpc_get_session_status(const arpc_session_handle_t fd)
+{
+	if(!fd)
+		return ARPC_SES_STA_INIT;
+	return ((const struct arpc_session_handle *)fd)->status;
+}
+
+void arpc_session_info(const arpc_session_handle_t fd)
+{
+	if(!fd)
+		return ;
+	print_session_status(((struct arpc_session_handle *)fd), NULL);
+}

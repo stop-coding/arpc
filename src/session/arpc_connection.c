@@ -566,7 +566,6 @@ static int arpc_client_run_loop(void * thread_ctx)
 		if (ret) {
 			ARPC_LOG_ERROR("xio loop error msg: %s.", xio_strerror(xio_errno()));
 		}
-
 		check_session_active(ctx);
 
 		ret = arpc_cond_lock(&ctx->cond);
@@ -611,9 +610,11 @@ static void arpc_conn_event_callback(int fd, int events, void *data)
 
 	ret = arpc_cond_lock(&ctx->cond);
 	LOG_THEN_RETURN_VAL_IF_TRUE(ret, ;, "tx event  arpc_cond_lock fail.");
+	SET_FLAG(ctx->flags, ARPC_CONN_EVENT_RUN);// 设置标志位，减少触发响应
 	ctx->event_cnt++;
 	if ((ctx->event_cnt%5000) == 0){
 		(void)eventfd_read(ctx->event_fd, &count);
+		ctx->event_cnt = 0;
 	}
 	if (IS_SET(ctx->flags, ARPC_CONN_ATTR_EXIT|ARPC_CONN_ATTR_SET_EXIT)){
 		ARPC_LOG_NOTICE("conn context[%d] to exit", ctx->status);
@@ -624,7 +625,6 @@ static void arpc_conn_event_callback(int fd, int events, void *data)
 		arpc_cond_unlock(&ctx->cond);
 		return;
 	}
-	SET_FLAG(ctx->flags, ARPC_CONN_EVENT_RUN);
 	arpc_cond_unlock(&ctx->cond);
 	switch (ctx->status)
 	{
@@ -644,10 +644,6 @@ static void arpc_conn_event_callback(int fd, int events, void *data)
 		ARPC_LOG_ERROR("conn status[%d] unkown", ctx->status);
 		break;
 	}
-	arpc_cond_lock(&ctx->cond);
-	CLR_FLAG(ctx->flags, ARPC_CONN_EVENT_RUN);
-	arpc_cond_unlock(&ctx->cond);
-	
 	return;
 }
 static void arpc_tx_event_callback(struct arpc_connection *usr_conn)
@@ -659,10 +655,11 @@ static void arpc_tx_event_callback(struct arpc_connection *usr_conn)
 	int max_tx_send = ARPC_MAX_TX_CNT_PER_WAKEUP; //每次唤醒最多发送消息数，避免阻塞太长
 	CONN_CTX(con, usr_conn, ;);
 
-	while(max_tx_send){
+	while(1){
 		arpc_mutex_lock(&con->msg_lock);
-		if(QUEUE_EMPTY(&con->q_tx_msg)){
+		if(QUEUE_EMPTY(&con->q_tx_msg) || max_tx_send < 0){
 			con->tx_msg_num = 0;
+			CLR_FLAG(con->flags, ARPC_CONN_EVENT_RUN);
 			arpc_mutex_unlock(&con->msg_lock);
 			break;
 		}
@@ -885,15 +882,14 @@ int arpc_connection_async_send(const struct arpc_connection *conn, struct arpc_c
 	msg->status = ARPC_MSG_STATUS_TX;
 	QUEUE_INSERT_TAIL(&ctx->q_tx_msg, &msg->q);
 	ctx->tx_msg_num++;
-	arpc_mutex_unlock(&ctx->msg_lock);
-
 	if(!IS_SET(ctx->flags, ARPC_CONN_EVENT_RUN)) {
 		ret = eventfd_write(ctx->event_fd, 1);//触发发送事件
 		LOG_ERROR_IF_VAL_TRUE(ret < 0, "ret[%d], write fd[%d] fail", ret, ctx->event_fd);
 	}
+	arpc_mutex_unlock(&ctx->msg_lock);
+
 	arpc_cond_unlock(&ctx->cond);
-	
-	print_session_status(arpc_get_conn_session((struct arpc_connection *)conn), &(msg->now));
+
 	return ret;
 unlock:
 	arpc_cond_unlock(&ctx->cond);

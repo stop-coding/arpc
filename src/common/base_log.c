@@ -145,6 +145,8 @@ static void write_log_file(char* filename, long max_size, const char *fmt, ...)
 	}
 }
 
+static int32_t log_enabale = 0;
+
 void arpc_vlog(enum arpc_log_level level, const char *module, const char *file,unsigned line, const char *function, const char *fmt, ...)
 {
 	va_list			args;
@@ -155,7 +157,6 @@ void arpc_vlog(enum arpc_log_level level, const char *module, const char *file,u
 	char			buf2[256];
 	char            log_file_path[64];
 	int			length = 0;
-	static int32_t log_enabale = 0;
 	static const char * const level_str[ARPC_LOG_LEVEL_E_MAX] = {
 		"FATAL", "ERROR", "WARN", "INFO", "DEBUG", "TRACE"
 	};
@@ -231,6 +232,18 @@ void arpc_vlog(enum arpc_log_level level, const char *module, const char *file,u
 		buf);
     }
 	//fflush(stderr);
+}
+
+int32_t get_log_status()
+{
+	return log_enabale;
+}
+
+void update_log_status(const char *module)
+{
+	int32_t log_status = 0;
+	set_log_switch(module, &log_status);
+	log_enabale = log_status;
 }
 
 #ifdef __cplusplus

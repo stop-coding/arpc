@@ -18,6 +18,7 @@
 #include <pthread.h>
 #include <unistd.h>
 #include <sys/time.h>
+#include <sys/prctl.h>
 
 #include "base_log.h"
 #include "arpc_com.h"
@@ -45,6 +46,35 @@ static struct xio_session_ops x_client_ops = {
 	.on_msg_error				=  &message_error
 };
 
+static int arpc_client_deamon(void *thread_ctx)
+{
+	struct arpc_session_handle *session = (struct arpc_session_handle *)thread_ctx;
+	//cpu_set_t		cpuset;
+	QUEUE* iter;
+	int ret;
+	char thread_name[16+1] ={0};
+	prctl(PR_SET_NAME, "client_deamon");
+
+	ret = arpc_cond_lock(&session->deamon_cond);
+	LOG_THEN_RETURN_VAL_IF_TRUE(ret, -1, "arpc_cond_lock session[%p] fail", session);
+
+	while(!session->is_close){
+		arpc_cond_wait_timeout(&session->deamon_cond, 15*1000);
+		if (session->is_close) {
+			break;
+		}
+		arpc_update_log_status();
+		if(ret) {
+			ARPC_LOG_ERROR("deamon lock client[%p] fail, status:%d,.", session, session->status);
+			break;
+		}
+		print_session_status(session, NULL);
+	}
+	arpc_cond_unlock(&session->deamon_cond);
+	ARPC_LOG_NOTICE("deamon exit[%lu].", pthread_self());
+	return 0;
+} 
+
 arpc_session_handle_t arpc_client_create_session(const struct arpc_client_session_param *param)
 {
 	int ret = 0;
@@ -58,6 +88,7 @@ arpc_session_handle_t arpc_client_create_session(const struct arpc_client_sessio
 	struct arpc_proto_new_session req_new;
 	struct tp_param pool_param;
 	uint32_t rx_con_num = 1;
+	struct tp_thread_work thread;
 	//LOG_THEN_RETURN_VAL_IF_TRUE(!param->ops, NULL, "ops is null.");
 
 	session = arpc_create_session(ARPC_SESSION_CLIENT, sizeof(struct arpc_client_ctx));
@@ -91,26 +122,29 @@ arpc_session_handle_t arpc_client_create_session(const struct arpc_client_sessio
 	req_new.max_head_len = session->msg_head_max_len;
 	req_new.max_data_len = session->msg_data_max_len;
 	req_new.max_iov_len  = session->msg_iov_max_len;
-
+	ARPC_LOG_NOTICE("req_new.max_data_len:%lu.", req_new.max_data_len);
 	if (param->req_data && param->req_data_len && param->req_data_len < MAX_SESSION_REQ_DATA_LEN) {
 		client_ctx->xio_param.private_data = arpc_mem_alloc(sizeof(struct arpc_tlv) + sizeof(struct arpc_proto_new_session), NULL);
 		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!client_ctx->xio_param.private_data, error_1, "arpc_mem_alloc fail.");
 		arpc_write_tlv(ARPC_PROTO_NEW_SESSION, sizeof(struct arpc_proto_new_session), client_ctx->xio_param.private_data);
-		pack_new_session(&req_new, (uint8_t*)client_ctx->xio_param.private_data 
-													+ sizeof(struct arpc_tlv), 
-													sizeof(struct arpc_proto_new_session));
+		pack_new_session(&req_new, 
+						(uint8_t*)client_ctx->xio_param.private_data + sizeof(struct arpc_tlv), 
+						sizeof(struct arpc_proto_new_session));
 		client_ctx->xio_param.private_data_len = sizeof(struct arpc_tlv) + sizeof(struct arpc_proto_new_session);
+		ARPC_LOG_NOTICE("private_data_le:%u.", client_ctx->xio_param.private_data_len);
 	}else{
 		client_ctx->xio_param.private_data = arpc_mem_alloc(sizeof(struct arpc_tlv) + sizeof(struct arpc_proto_new_session), NULL);
 		LOG_THEN_GOTO_TAG_IF_VAL_TRUE(!client_ctx->xio_param.private_data, error_1, "arpc_mem_alloc fail.");
 		arpc_write_tlv(ARPC_PROTO_NEW_SESSION, sizeof(struct arpc_proto_new_session), client_ctx->xio_param.private_data);
-		client_ctx->xio_param.private_data_len = pack_new_session(&req_new, (uint8_t*)client_ctx->xio_param.private_data 
-														+ sizeof(struct arpc_tlv), 
-														sizeof(struct arpc_proto_new_session));
+		pack_new_session(&req_new,
+						 (uint8_t*)client_ctx->xio_param.private_data + sizeof(struct arpc_tlv), 
+						sizeof(struct arpc_proto_new_session));
+		client_ctx->xio_param.private_data_len = sizeof(struct arpc_tlv) + sizeof(struct arpc_proto_new_session);
+		ARPC_LOG_NOTICE("private_data_le:%u.", client_ctx->xio_param.private_data_len);
 	}
 
 	pool_param.cpu_max_num = 16;
-	pool_param.thread_max_num = (param->con_num > 0)?(param->con_num*2 + 2):12;	// 默认是1:3的关系					
+	pool_param.thread_max_num = (param->con_num > 0)?(param->con_num*2 + 2 + 1):12;	// 默认是1:3的关系	,一个状态线程				
 	session->threadpool = tp_create_thread_pool(&pool_param);
 
 	idle_thread_num = (param->con_num > 0)? param->con_num : 2; // 默认是两个链接
@@ -143,6 +177,13 @@ arpc_session_handle_t arpc_client_create_session(const struct arpc_client_sessio
 	}
 	ARPC_LOG_NOTICE("ARPC version[%s].", arpc_version());
 	ARPC_LOG_NOTICE("Create session[%p] success, work thread num[%u], rx num[%u]!!", session, idle_thread_num, rx_con_num);
+
+	thread.loop = &arpc_client_deamon;
+	thread.stop = NULL;
+	thread.usr_ctx = (void*)session;
+
+	tp_post_one_work(session->threadpool, &thread, WORK_DONE_AUTO_FREE);
+
 	return (arpc_session_handle_t)session;
 
 destroy_conn:
@@ -175,11 +216,6 @@ int arpc_client_destroy_session(arpc_session_handle_t *fd)
 	tp_destroy_thread_pool(&thread_pool);
 	*fd = NULL;
 	return ret;
-}
-
-enum arpc_session_status arpc_get_session_status(const arpc_session_handle_t fd)
-{
-	return ARPC_SES_STA_ACTIVE;
 }
 
 static int client_session_established(struct xio_session *session, struct xio_new_session_rsp *rsp, void *session_context)

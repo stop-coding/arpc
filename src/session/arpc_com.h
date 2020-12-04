@@ -47,6 +47,11 @@ extern "C" {
 #define ARPC_LOG_TRACE(format, arg...) 	BASE_LOG_TRACE(format,  ##arg)
 #define ARPC_LOG_STATUS(format, arg...) BASE_LOG_STATUS(format,  ##arg)
 
+static inline void arpc_update_log_status()
+{
+	update_log_status("ARPC");
+}
+
 #define ARPC_ASSERT(condition, format, arg...) BASE_ASSERT(condition, format, ##arg)
 
 #define URI_MAX_LEN 	256

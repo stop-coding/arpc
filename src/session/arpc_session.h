@@ -56,6 +56,7 @@ struct arpc_session_handle{
 	QUEUE     q;
 	QUEUE     q_con;
 	struct arpc_mutex  lock;
+	struct arpc_cond  deamon_cond;
 	uint32_t 	conn_num;
 	uint32_t 	reconnect_times;
 	uint64_t 	tx_total;

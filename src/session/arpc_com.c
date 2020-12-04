@@ -157,6 +157,7 @@ int arpc_init_r(struct aprc_option *opt)
 	xio_init();
 	set_xio_option(&g_param.opt);
 	arpc_crc_init();
+	
 	return 0;
 }
 int arpc_init()
