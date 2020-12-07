@@ -336,7 +336,9 @@ int create_xio_msg_usr_buf(struct xio_msg *msg, struct proc_header_func *ops, ui
 		ARPC_LOG_ERROR("func malloc or free is null.");
 		return ARPC_ERROR;
 	}
-	iov_max_len = (proto.iovec_num > 0)?(msg->in.total_data_len/proto.iovec_num):iov_max_len;//根据请求消息设置vec长度
+	//iov_max_len = (proto.iovec_num > 0)?(msg->in.total_data_len/proto.iovec_num):iov_max_len;//根据请求消息设置vec长度,暂时不启用
+
+	ARPC_LOG_TRACE("iov_max_len:%u, proto.iovec_num:%u", iov_max_len, proto.iovec_num);
 	// 分配内存
 	last_size = msg->in.total_data_len%iov_max_len;
 	nents = (last_size)? 1: 0;

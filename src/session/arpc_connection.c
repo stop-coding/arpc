@@ -174,6 +174,9 @@ struct arpc_connection *arpc_create_connection(const struct arpc_connection_para
 	ctx->msg_iov_max_len = param->session->msg_iov_max_len;
 	ctx->msg_data_max_len = param->session->msg_data_max_len;
 	ctx->msg_head_max_len = param->session->msg_head_max_len;
+	ARPC_LOG_DEBUG("con[%p], msg_iov_max_len:%u",ctx, ctx->msg_iov_max_len);
+	ARPC_LOG_DEBUG("con[%p], msg_data_max_len:%u",ctx, ctx->msg_data_max_len);
+	ARPC_LOG_DEBUG("con[%p], msg_head_max_len:%u",ctx, ctx->msg_head_max_len);
 	ctx->xio_con_ctx = param->xio_con_ctx;
 	ctx->xio_con = param->xio_con;
 	
