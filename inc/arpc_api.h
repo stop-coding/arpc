@@ -542,8 +542,13 @@ struct arpc_new_session_rsp{
 	enum arpc_new_session_status	ret_status;					/*! @brief 应答当前新建session调用者返回值，ARPC_E_STATUS_OK是可以建立，其它则失败*/
 	struct arpc_session_ops			*ops;						/*! @brief 设置当前session的回调函数，可选，默认使用注册时回调函数*/
 	void							*ops_new_ctx;				/*! @brief 新session的回调函数上下文参数 */
+	#ifndef	__cplusplus
 	void							*private;					/*! @brief 调用者私有数据,是server返回给client申请者 */
 	uint32_t						private_len;				/*! @brief 调用者私有数据长度 */
+	#else
+	void							*usr_ctx;					/*! @brief 调用者私有数据,是server返回给client申请者 */
+	uint32_t						usr_ctx_len;				/*! @brief 调用者私有数据长度 */
+	#endif
 };
 
 /*!
