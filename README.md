@@ -4,14 +4,14 @@
 
 * for linux (ubuntu)
 * apt-get install cmake
-
-	1. cd code root;
-	2. mkdir build
-	3. cd build
-	4. cmake ../    (default:debug mode)
-	5. make -j
-	6. make install
-
+'''
+1. cd code root;
+2. mkdir build
+3. cd build
+4. cmake ../    (default:debug mode)
+5. make -j
+6. make install
+'''
 ---
 #                    file tree
 * demo(demo测试应用)
