@@ -1,18 +1,17 @@
----
-#                    build
-*【说明】编译工程采用cmake编译
+# arpc
+  基于XIO实现的远程通信框架，用于分布式文件系统数据传输
 
-* for linux (ubuntu)
-* apt-get install cmake
-'''
-1. cd code root;
-2. mkdir build
-3. cd build
-4. cmake ../    (default:debug mode)
-5. make -j
-6. make install
-'''
----
+#                    build
+【说明】编译工程采用cmake编译
+
+cd code root;
+mkdir build
+cd build
+cmake ../    (default:debug mode)
+make -j
+make install
+
+
 #                    file tree
 * demo(demo测试应用)
 
@@ -20,7 +19,7 @@
 
 * src (arpc 源码)
 
-* inc (arpc 函数头)
+* inc (arpc api)
 
-#说明
+# 其它说明
 生成库文件libarpc.so
